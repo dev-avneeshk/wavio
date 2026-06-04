@@ -17,50 +17,46 @@ export function About() {
           <div className="lg:col-span-7 space-y-6">
             <Reveal delay={0.1}>
               <p className="text-xl md:text-2xl text-white/70 leading-relaxed font-light">
-                I&apos;m a data engineer, AI builder, and creative technologist who
-                treats every tool as a lever — from Python scripts to cinematic AI
-                video generators.
+                I build with generative AI, automate the boring parts of everything,
+                and create content that looks like a full team made it — because
+                the AI did half the work.
               </p>
             </Reveal>
             <Reveal delay={0.2}>
               <p className="text-base text-white/40 leading-relaxed">
-                Most of my work involves Python, SQL, and whatever gets data from
-                point A to a decision at point B as fast as possible. I designed and
-                shipped lasyly.me — a live sports analytics platform processing data
-                across 10+ leagues with sub-500ms latency using WebSockets, ML models,
-                and a unified data layer.
+                My core is generative AI and automation. I chain AI tools together
+                into workflows that actually produce things — not just demos. ChatGPT,
+                Claude, Gemini for ideation and code. Midjourney and DALL·E for visuals.
+                Runway Gen-3 and Kling for cinematic AI video. ElevenLabs for voice.
+                Cursor and Copilot for shipping code 10x faster. I don&apos;t use
+                these as individual tools — I build systems around them.
               </p>
             </Reveal>
             <Reveal delay={0.25}>
               <p className="text-base text-white/40 leading-relaxed">
-                On the AI side — I live in this space. I use generative AI daily for
-                everything: ChatGPT, Claude, Gemini for ideation and code, Midjourney
-                and DALL·E for visuals, Runway and Kling for cinematic AI video,
-                ElevenLabs for voice, Cursor and Copilot for shipping code 10x faster.
-                I don&apos;t just &quot;use AI tools&quot; — I build workflows around them,
-                chain them together, and produce things that look like a full team made them.
+                Automation is the other side of this. I&apos;ve built bots, scrapers,
+                alert pipelines, and real-time data systems that run without
+                intervention. If a task is repetitive, I&apos;ve probably already
+                written a script for it. The NBA news bot, the CityAgent alert system,
+                lasyly.me — all of these are automation at their core.
               </p>
             </Reveal>
             <Reveal delay={0.3}>
               <p className="text-base text-white/40 leading-relaxed">
-                I also run content channels — video editing, scripting, thumbnail design,
-                audience growth. I know Premiere Pro, After Effects, DaVinci Resolve,
-                CapCut, and how to turn a raw idea into a polished video that performs.
-                The whole pipeline from concept to publish.
+                On the content side, I do the whole pipeline. Scripting, filming
+                concepts, editing in Premiere Pro, After Effects, DaVinci Resolve,
+                and CapCut. Thumbnails, motion graphics, channel strategy. I also use
+                AI video tools — Runway, Kling, Sora — to generate cinematic sequences
+                that would cost a production team weeks. The output looks polished
+                because the workflow is tight.
               </p>
             </Reveal>
             <Reveal delay={0.35}>
               <p className="text-base text-white/40 leading-relaxed">
-                B.Sc. in Data Analytics from ICFAI Tech Hyderabad (2023–2026).
-                Previously interned at Skillbanc where I shipped production components
-                and used interaction data to fix UX problems. Certified through
-                Deloitte and KPMG analytics programs.
-              </p>
-            </Reveal>
-            <Reveal delay={0.4}>
-              <p className="text-base text-white/40 leading-relaxed">
-                Outside of work — basketball, sports modeling, building automation
-                bots, and experimenting with whatever new AI model dropped this week.
+                On the technical side — Python, SQL, Next.js, TypeScript, PostgreSQL,
+                WebSockets. I&apos;ve shipped full-stack products solo. LangChain,
+                prompt engineering, AI workflow architecture. The code is the tool,
+                not the product. The product is whatever gets built with it.
               </p>
             </Reveal>
           </div>
@@ -71,76 +67,57 @@ export function About() {
               <Reveal delay={0.2}>
                 <div>
                   <h4 className="font-mono text-xs text-accent uppercase tracking-widest mb-3">
-                    Languages
+                    Generative AI
                   </h4>
                   <p className="text-sm text-white/50">
-                    Python, SQL, JavaScript, TypeScript, Java
+                    ChatGPT, Claude, Gemini, Midjourney, DALL·E, Stable Diffusion,
+                    Runway Gen-3, Kling AI, Sora, ElevenLabs, LangChain,
+                    Prompt Engineering, AI Workflow Design
                   </p>
                 </div>
               </Reveal>
               <Reveal delay={0.3}>
                 <div>
                   <h4 className="font-mono text-xs text-accent uppercase tracking-widest mb-3">
-                    Data & ML
+                    Automation & Coding
                   </h4>
                   <p className="text-sm text-white/50">
-                    Pandas, NumPy, Scikit-learn, Statistical Analysis, Predictive
-                    Modeling, A/B Testing, EDA, Feature Engineering, Anomaly Detection
+                    Python, Cursor, GitHub Copilot, Web Scraping, Bots,
+                    ETL Pipelines, REST APIs, WebSockets, Real-Time Systems,
+                    Next.js, TypeScript, PostgreSQL
                   </p>
                 </div>
               </Reveal>
               <Reveal delay={0.4}>
                 <div>
                   <h4 className="font-mono text-xs text-accent uppercase tracking-widest mb-3">
-                    Visualization
+                    Video & Creative
                   </h4>
                   <p className="text-sm text-white/50">
-                    Tableau, Power BI, Matplotlib, Seaborn, Dashboard Design
+                    Premiere Pro, After Effects, DaVinci Resolve, CapCut,
+                    AI Video (Runway, Kling, Sora), Motion Graphics,
+                    Thumbnail Design, Scripting, Content Strategy
                   </p>
                 </div>
               </Reveal>
               <Reveal delay={0.5}>
                 <div>
                   <h4 className="font-mono text-xs text-accent uppercase tracking-widest mb-3">
-                    Engineering
+                    Languages
                   </h4>
                   <p className="text-sm text-white/50">
-                    PostgreSQL, MySQL, Supabase, WebSockets, ETL Pipelines,
-                    Real-Time Ingestion, Data Modeling, REST APIs
+                    Python, TypeScript, JavaScript, SQL, Java
                   </p>
                 </div>
               </Reveal>
               <Reveal delay={0.6}>
                 <div>
                   <h4 className="font-mono text-xs text-accent uppercase tracking-widest mb-3">
-                    Tools
+                    Currently Exploring
                   </h4>
                   <p className="text-sm text-white/50">
-                    Git, React, Next.js, Flask, Vercel, Jupyter, Agile/Scrum
-                  </p>
-                </div>
-              </Reveal>
-              <Reveal delay={0.7}>
-                <div>
-                  <h4 className="font-mono text-xs text-accent uppercase tracking-widest mb-3">
-                    Generative AI
-                  </h4>
-                  <p className="text-sm text-white/50">
-                    ChatGPT, Claude, Gemini, Midjourney, DALL·E, Stable Diffusion,
-                    Runway Gen-3, Kling AI, Sora, ElevenLabs, Cursor, GitHub Copilot,
-                    LangChain, Prompt Engineering, AI Workflows & Automation
-                  </p>
-                </div>
-              </Reveal>
-              <Reveal delay={0.8}>
-                <div>
-                  <h4 className="font-mono text-xs text-accent uppercase tracking-widest mb-3">
-                    Video & Creative
-                  </h4>
-                  <p className="text-sm text-white/50">
-                    Premiere Pro, After Effects, DaVinci Resolve, CapCut,
-                    Video Editing, Motion Graphics, Thumbnail Design,
-                    Content Strategy, Channel Management, Scripting
+                    Agent frameworks, AI video automation pipelines,
+                    multi-modal content workflows, fine-tuning open models
                   </p>
                 </div>
               </Reveal>

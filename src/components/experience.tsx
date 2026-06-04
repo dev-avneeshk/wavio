@@ -2,19 +2,27 @@
 
 import { Reveal } from "./reveal";
 
-const experiences = [
+const expertise = [
   {
-    period: "Jan – Jun 2025",
-    role: "Frontend Developer Intern",
-    company: "Skillbanc",
+    category: "Generative AI Workflows",
     description:
-      "Shipped 4+ production UI components across 3 sprints. Analyzed user interaction data to redesign auth flow. Cross-functional team of 8+.",
+      "Building end-to-end AI systems that chain multiple models together. Prompt engineering, LangChain pipelines, AI video generation (Runway, Kling, Sora), voice synthesis (ElevenLabs), and visual generation (Midjourney, DALL·E, Stable Diffusion). Producing cinematic content, automating repetitive creative tasks, and shipping AI-powered products.",
   },
-];
-
-const certs = [
-  { name: "Data Analytics Virtual Experience", org: "Deloitte", year: "2026" },
-  { name: "Analytics Consulting Virtual Internship", org: "KPMG", year: "2026" },
+  {
+    category: "Automation & Bots",
+    description:
+      "Building scrapers, alert systems, Telegram bots, real-time data pipelines, and ETL workflows. Python-first automation that eliminates manual work. If it can be automated, I've probably done it. Examples: NBA news bot, CityAgent alert system, lasyly.me real-time sports pipeline.",
+  },
+  {
+    category: "Content Creation",
+    description:
+      "Full video production pipeline — scripting, filming, editing (Premiere Pro, After Effects, DaVinci Resolve, CapCut), motion graphics, thumbnail design, and channel strategy. Combining AI video tools with traditional editing to produce high-quality content solo. Managing content channels, audience growth, and performance analytics.",
+  },
+  {
+    category: "Coding & Development",
+    description:
+      "Full-stack product development with Python, TypeScript, Next.js, PostgreSQL, WebSockets. Shipped lasyly.me (sports analytics platform), Zone (productivity app), CityAgent (hackathon winner). AI-assisted coding with Cursor, Copilot. Building fast, shipping faster.",
+  },
 ];
 
 export function Experience() {
@@ -23,76 +31,58 @@ export function Experience() {
       <div className="max-w-[1400px] mx-auto">
         <Reveal>
           <h2 className="text-5xl md:text-7xl font-black tracking-tighter mb-20">
-            Experience<span className="text-accent">.</span>
+            What I Do<span className="text-accent">.</span>
           </h2>
         </Reveal>
 
-        {/* Work */}
-        <div className="mb-20">
-          {experiences.map((exp, i) => (
+        {/* Expertise areas */}
+        <div className="space-y-12">
+          {expertise.map((item, i) => (
             <Reveal key={i} delay={i * 0.1}>
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 py-8 border-b border-border">
-                <div className="md:col-span-3">
-                  <span className="font-mono text-sm text-white/30">
-                    {exp.period}
-                  </span>
-                </div>
-                <div className="md:col-span-9">
-                  <h3 className="text-xl font-semibold mb-1">
-                    {exp.role}{" "}
-                    <span className="text-white/40 font-normal">
-                      @ {exp.company}
-                    </span>
-                  </h3>
-                  <p className="text-sm text-white/40 leading-relaxed">
-                    {exp.description}
-                  </p>
-                </div>
+              <div className="border-l-2 border-accent/30 pl-8 py-4">
+                <h3 className="text-2xl font-bold mb-3">
+                  {item.category}
+                </h3>
+                <p className="text-base text-white/50 leading-relaxed">
+                  {item.description}
+                </p>
               </div>
             </Reveal>
           ))}
         </div>
 
-        {/* Certs */}
-        <Reveal>
-          <h3 className="font-mono text-xs text-accent uppercase tracking-widest mb-8">
-            Certifications
-          </h3>
-        </Reveal>
-        <div className="space-y-4">
-          {certs.map((cert, i) => (
-            <Reveal key={i} delay={i * 0.1}>
-              <div className="flex items-center justify-between py-4 border-b border-border">
-                <div>
-                  <span className="text-base font-medium">{cert.name}</span>
-                  <span className="text-white/30 ml-3 text-sm">
-                    — {cert.org}
-                  </span>
-                </div>
-                <span className="font-mono text-xs text-white/20">
-                  {cert.year}
-                </span>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-
-        {/* Education */}
-        <Reveal delay={0.2}>
-          <div className="mt-16 p-8 border border-border rounded-xl bg-surface">
-            <h3 className="font-mono text-xs text-accent uppercase tracking-widest mb-4">
-              Education
+        {/* Tools I use daily */}
+        <Reveal delay={0.5}>
+          <div className="mt-20 p-8 border border-border rounded-xl bg-surface">
+            <h3 className="font-mono text-xs text-accent uppercase tracking-widest mb-6">
+              Tools I Use Daily
             </h3>
-            <h4 className="text-lg font-semibold">
-              B.Sc. Data Analytics
-            </h4>
-            <p className="text-sm text-white/40 mt-1">
-              ICFAI Tech Hyderabad — 2023–2026
-            </p>
-            <p className="text-xs text-white/30 mt-2">
-              Relevant: Data Structures & Algorithms, Statistical Analysis,
-              Database Management, Machine Learning, Data Visualization
-            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              <div>
+                <h4 className="text-sm font-semibold mb-2 text-white/70">AI</h4>
+                <p className="text-xs text-white/40 leading-relaxed">
+                  ChatGPT, Claude, Gemini, Cursor, Midjourney, Runway, Kling, ElevenLabs
+                </p>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold mb-2 text-white/70">Code</h4>
+                <p className="text-xs text-white/40 leading-relaxed">
+                  Python, TypeScript, Next.js, PostgreSQL, Git, Copilot
+                </p>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold mb-2 text-white/70">Video</h4>
+                <p className="text-xs text-white/40 leading-relaxed">
+                  Premiere Pro, After Effects, DaVinci, CapCut, Figma
+                </p>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold mb-2 text-white/70">Automation</h4>
+                <p className="text-xs text-white/40 leading-relaxed">
+                  Scrapers, Bots, Telegram API, WebSockets, ETL pipelines
+                </p>
+              </div>
+            </div>
           </div>
         </Reveal>
       </div>

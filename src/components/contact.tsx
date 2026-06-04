@@ -17,22 +17,22 @@ export function Contact() {
       <div className="max-w-[1400px] mx-auto relative z-10">
         <Reveal>
           <p className="font-mono text-sm text-accent mb-8">
-            Open to opportunities
+            Let&apos;s collaborate
           </p>
         </Reveal>
 
         <TextReveal delay={0.2}>
           <h2 className="text-5xl md:text-8xl font-black tracking-tighter leading-[0.9] mb-12">
-            Let&apos;s build<br />
-            something<span className="text-accent">.</span>
+            Got a project<br />
+            in mind<span className="text-accent">?</span>
           </h2>
         </TextReveal>
 
         <Reveal delay={0.4}>
           <p className="text-lg text-white/40 max-w-lg mb-16">
-            Looking for data analyst, data engineer, or analytics engineering
-            roles where I can apply end-to-end data skills to drive measurable
-            business impact.
+            Open to collaborations on AI-powered products, automation projects,
+            content creation workflows, or anything that involves building something
+            new and interesting.
           </p>
         </Reveal>
 

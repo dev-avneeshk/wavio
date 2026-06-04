@@ -36,11 +36,12 @@ export function Nav() {
         </Magnetic>
         <Magnetic>
           <a
-            href="/Avneesh_Kumar_Resume.docx"
-            download
+            href="https://instagram.com/lasyly.me"
+            target="_blank"
+            rel="noopener noreferrer"
             className="text-sm text-white/70 hover:text-white transition-colors"
           >
-            résumé
+            content
           </a>
         </Magnetic>
         <Magnetic>
@@ -48,7 +49,7 @@ export function Nav() {
             href="mailto:dev.avneeshk@gmail.com"
             className="text-sm px-4 py-2 rounded-full border border-white/20 text-white hover:bg-white hover:text-black transition-all duration-300"
           >
-            contact
+            collab
           </a>
         </Magnetic>
       </nav>

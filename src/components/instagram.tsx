@@ -15,9 +15,9 @@ export function Instagram() {
                 <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
                 <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
               </svg>
-              <span className="text-white/40 text-sm font-mono">@lasyly.me</span>
+              <span className="text-sm text-white/30 font-mono">@lasyly.me</span>
               <span className="text-border text-sm">·</span>
-              <span className="text-white/20 text-sm">Sports analytics, AI experiments & builds</span>
+              <span className="text-white/20 text-sm">AI workflows, automation projects & content experiments</span>
             </div>
             <a
               href="https://instagram.com/lasyly.me"

@@ -14,7 +14,7 @@ export function Hero() {
         className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
       >
         <span className="text-[20vw] font-black tracking-tighter text-white whitespace-nowrap">
-          DATA
+          BUILD
         </span>
       </motion.div>
 
@@ -22,7 +22,7 @@ export function Hero() {
         <div className="mb-8">
           <TextReveal delay={0.2}>
             <p className="font-mono text-sm text-accent tracking-wide">
-              Data Engineer — AI Builder — Creative Technologist
+              Generative AI — Automation — Content Creation
             </p>
           </TextReveal>
         </div>
@@ -43,24 +43,22 @@ export function Hero() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-end">
           <TextReveal delay={0.7}>
             <p className="text-lg text-white/50 max-w-md leading-relaxed">
-              I build production-grade data pipelines, ship AI-powered products,
-              and create cinematic content with generative AI. If it involves
-              data, code, or a camera — I&apos;ve probably already automated it.
+              I build AI-powered tools, automate complex workflows, and create
+              cinematic content using generative AI. One person. Full pipeline.
+              From idea to shipped product — faster than most teams.
             </p>
           </TextReveal>
 
           <TextReveal delay={0.9}>
             <a
-              href="/Avneesh_Kumar_Resume.docx"
-              download
+              href="#work"
               className="inline-flex items-center gap-2 mt-6 px-5 py-2.5 text-sm font-medium border border-accent/40 text-accent rounded-full hover:bg-accent/10 transition-all duration-300"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
+              See my work
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
               </svg>
-              Download CV
             </a>
           </TextReveal>
 

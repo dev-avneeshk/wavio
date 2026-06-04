@@ -1,0 +1,65 @@
+"use client";
+
+import { Reveal, TextReveal } from "./reveal";
+
+export function Showcase() {
+  return (
+    <section className="py-32 px-8 bg-surface">
+      <div className="max-w-[1400px] mx-auto">
+        <Reveal>
+          <p className="font-mono text-xs text-accent uppercase tracking-widest mb-4">
+            Creative Showcase
+          </p>
+        </Reveal>
+
+        <TextReveal delay={0.1}>
+          <h2 className="text-5xl md:text-7xl font-black tracking-tighter mb-6">
+            AI-Made<span className="text-accent">.</span>
+          </h2>
+        </TextReveal>
+
+        <Reveal delay={0.2}>
+          <p className="text-lg text-white/40 max-w-2xl mb-16 leading-relaxed">
+            Everything you see and hear — visuals, music, voice, sound design —
+            was generated with AI. Midjourney, Runway, Kling, ElevenLabs, Sora.
+            The only human touch was the edit.
+          </p>
+        </Reveal>
+
+        <Reveal delay={0.3}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="group relative rounded-xl overflow-hidden border border-border bg-black">
+              <video
+                src="/s1.mp4"
+                controls
+                playsInline
+                preload="metadata"
+                className="w-full aspect-video object-cover"
+              />
+              <div className="p-4 border-t border-border">
+                <p className="font-mono text-xs text-white/30 uppercase tracking-widest">
+                  Visuals · Music · Voice — AI &nbsp;/&nbsp; Edit — Human
+                </p>
+              </div>
+            </div>
+
+            <div className="group relative rounded-xl overflow-hidden border border-border bg-black">
+              <video
+                src="/s2.mp4"
+                controls
+                playsInline
+                preload="metadata"
+                className="w-full aspect-video object-cover"
+              />
+              <div className="p-4 border-t border-border">
+                <p className="font-mono text-xs text-white/30 uppercase tracking-widest">
+                  Visuals · Music · Voice — AI &nbsp;/&nbsp; Edit — Human
+                </p>
+              </div>
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}

@@ -29,17 +29,6 @@ const projects = [
   },
   {
     id: "03",
-    name: "E-Commerce EDA",
-    tagline: "Sales analysis on 50k+ transactions",
-    description:
-      "End-to-end exploratory analysis. Statistical imputation for 12% missing values. Surfaced peak revenue periods, top categories, and 2 underserved regional demand patterns.",
-    stats: ["50k+ records", "12% imputed", "3 key insights"],
-    stack: ["Pandas", "NumPy", "SQL", "Matplotlib", "Seaborn"],
-    link: "https://github.com/dev-avneeshk",
-    year: "2026",
-  },
-  {
-    id: "04",
     name: "Zone",
     tagline: "Full-stack productivity app",
     description:
@@ -50,7 +39,7 @@ const projects = [
     year: "2026",
   },
   {
-    id: "05",
+    id: "04",
     name: "NBA News Bot",
     tagline: "Automated news pipeline → Telegram",
     description:

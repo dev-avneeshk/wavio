@@ -66,6 +66,14 @@ export function Contact() {
               LinkedIn
             </a>
             <a
+              href="https://instagram.com/lasyly.me"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-white/40 hover:text-accent hover-line transition-colors"
+            >
+              Instagram
+            </a>
+            <a
               href="https://lasyly.me"
               target="_blank"
               rel="noopener noreferrer"

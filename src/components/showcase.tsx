@@ -34,7 +34,7 @@ export function Showcase() {
                 controls
                 playsInline
                 preload="metadata"
-                className="w-full aspect-video object-cover"
+                className="w-full block"
               />
             </div>
 
@@ -44,7 +44,7 @@ export function Showcase() {
                 controls
                 playsInline
                 preload="metadata"
-                className="w-full aspect-video object-cover"
+                className="w-full block"
               />
               <div className="p-4 border-t border-border">
                 <p className="font-mono text-xs text-white/30 uppercase tracking-widest">

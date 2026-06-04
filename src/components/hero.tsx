@@ -40,40 +40,6 @@ export function Hero() {
           </TextReveal>
         </div>
 
-        {/* Showcase videos */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.6 }}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-12"
-        >
-          <div className="rounded-xl overflow-hidden border border-border bg-black">
-            <video
-              src="/s1.mp4"
-              controls
-              playsInline
-              preload="metadata"
-              style={{ aspectRatio: "720/1190" }}
-              className="w-full object-fill"
-            />
-          </div>
-          <div className="rounded-xl overflow-hidden border border-border bg-black">
-            <video
-              src="/s2.mp4"
-              controls
-              playsInline
-              preload="metadata"
-              style={{ aspectRatio: "1280/490" }}
-              className="w-full object-fill"
-            />
-            <div className="p-3 border-t border-border">
-              <p className="font-mono text-xs text-white/30 uppercase tracking-widest">
-                Concept to Execution — Directed by Me
-              </p>
-            </div>
-          </div>
-        </motion.div>
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-end">
           <TextReveal delay={0.7}>
             <p className="text-lg text-white/50 max-w-md leading-relaxed">

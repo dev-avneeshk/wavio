@@ -27,14 +27,15 @@ export function Showcase() {
         </Reveal>
 
         <Reveal delay={0.3}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
             <div className="rounded-xl overflow-hidden border border-border bg-black">
               <video
                 src="/s1.mp4"
                 controls
                 playsInline
                 preload="metadata"
-                className="w-full h-[400px] object-cover"
+                className="w-full max-h-[420px]"
+                style={{ display: "block" }}
               />
             </div>
 
@@ -44,7 +45,8 @@ export function Showcase() {
                 controls
                 playsInline
                 preload="metadata"
-                className="w-full h-[400px] object-cover"
+                className="w-full max-h-[420px]"
+                style={{ display: "block" }}
               />
               <div className="p-4 border-t border-border">
                 <p className="font-mono text-xs text-white/30 uppercase tracking-widest">

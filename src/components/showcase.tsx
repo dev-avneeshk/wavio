@@ -27,26 +27,24 @@ export function Showcase() {
         </Reveal>
 
         <Reveal delay={0.3}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-            <div className="group relative rounded-xl overflow-hidden border border-border bg-black">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="rounded-xl overflow-hidden border border-border bg-black">
               <video
                 src="/s1.mp4"
                 controls
                 playsInline
                 preload="metadata"
-                style={{ aspectRatio: "720/1190" }}
-                className="w-full object-fill"
+                className="w-full h-[400px] object-cover"
               />
             </div>
 
-            <div className="group relative rounded-xl overflow-hidden border border-border bg-black">
+            <div className="rounded-xl overflow-hidden border border-border bg-black">
               <video
                 src="/s2.mp4"
                 controls
                 playsInline
                 preload="metadata"
-                style={{ aspectRatio: "1280/490" }}
-                className="w-full object-fill"
+                className="w-full h-[400px] object-cover"
               />
               <div className="p-4 border-t border-border">
                 <p className="font-mono text-xs text-white/30 uppercase tracking-widest">

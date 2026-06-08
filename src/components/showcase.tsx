@@ -27,7 +27,7 @@ export function Showcase() {
         </Reveal>
 
         <Reveal delay={0.3}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="flex flex-col gap-6">
             <div className="rounded-xl overflow-hidden border border-border bg-black">
               <video
                 src="/s1.mp4"

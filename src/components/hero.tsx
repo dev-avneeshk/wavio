@@ -154,10 +154,7 @@ export function Hero() {
 
                   {/* Caption Bar */}
                   <div className="absolute bottom-3 left-3 right-3 p-3 rounded-xl bg-surface/85 border border-border/80 backdrop-blur-sm flex items-center justify-between text-xs font-mono">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-accent-emerald animate-pulse" />
-                      <span className="text-white font-medium">Avneesh Kumar</span>
-                    </div>
+                    <span className="text-white font-medium">Avneesh Kumar</span>
                     <span className="text-accent-cyan text-[11px]">ICFAI Tech</span>
                   </div>
                 </div>

@@ -9,7 +9,6 @@ const navItems = [
   { name: "Skills", href: "#skills" },
   { name: "Projects", href: "#projects" },
   { name: "Experience", href: "#experience" },
-  { name: "Terminal", href: "#terminal" },
   { name: "Achievements", href: "#achievements" },
   { name: "Contact", href: "#contact" },
 ];
@@ -34,51 +33,49 @@ export function Nav() {
         transition={{ duration: 0.8, delay: 0.2, ease: [0.76, 0, 0.24, 1] }}
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
           scrolled
-            ? "bg-bg/85 backdrop-blur-md border-b border-border/80 py-3 shadow-lg shadow-black/30"
-            : "bg-transparent py-6"
+            ? "bg-bg/90 backdrop-blur-md border-b border-border/80 py-3 shadow-lg shadow-black/40"
+            : "bg-transparent py-5"
         }`}
       >
-        <div className="max-w-[1400px] mx-auto px-6 md:px-10 flex items-center justify-between">
+        <div className="max-w-[1400px] mx-auto px-6 md:px-10 flex items-center justify-between gap-4">
+          {/* Brand */}
           <Magnetic>
             <a
               href="#"
-              className="group flex items-center gap-2 text-sm font-semibold tracking-tight text-white hover:text-accent-cyan transition-colors"
+              className="group flex items-center gap-2 text-sm font-semibold tracking-tight text-white hover:text-accent-cyan transition-colors whitespace-nowrap flex-shrink-0"
             >
               <span className="font-mono text-xs text-accent-cyan font-bold tracking-wider group-hover:text-white transition-colors">
                 AK
               </span>
-              <span>·</span>
-              <span>avneesh kumar</span>
-              <span className="hidden sm:inline-block font-mono text-[11px] px-2 py-0.5 rounded bg-surface border border-border text-white/50 group-hover:text-accent-cyan transition-colors">
+              <span className="text-white/40">·</span>
+              <span className="tracking-tight">avneesh kumar</span>
+              <span className="hidden xl:inline-block font-mono text-[10px] px-2 py-0.5 rounded bg-surface border border-border text-white/50 group-hover:text-accent-cyan transition-colors ml-1">
                 DATA ANALYST
               </span>
             </a>
           </Magnetic>
 
           {/* Desktop Nav */}
-          <nav className="hidden lg:flex items-center gap-7">
-            {navItems.map((item, idx) => (
+          <nav className="hidden lg:flex items-center gap-5 xl:gap-7 flex-shrink-0">
+            {navItems.map((item) => (
               <Magnetic key={item.name}>
                 <a
                   href={item.href}
-                  className="font-mono text-xs text-white/60 hover:text-accent-cyan transition-colors tracking-wide flex items-center gap-1 group"
+                  className="font-mono text-xs text-white/60 hover:text-accent-cyan transition-colors tracking-wide whitespace-nowrap"
                 >
-                  <span className="text-white/20 text-[10px] group-hover:text-accent-cyan/50 transition-colors">
-                    0{idx + 1}.
-                  </span>
-                  <span>{item.name.toLowerCase()}</span>
+                  {item.name.toLowerCase()}
                 </a>
               </Magnetic>
             ))}
           </nav>
 
           {/* Right Action buttons */}
-          <div className="hidden sm:flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-3 flex-shrink-0">
             <Magnetic>
               <a
                 href="/Avneesh_Kumar_Resume.docx"
                 download="Avneesh_Kumar_Resume.docx"
-                className="font-mono text-xs px-3.5 py-1.5 rounded-full border border-border bg-surface/80 text-white/80 hover:text-white hover:border-accent-cyan/50 hover:bg-surface-hover transition-all flex items-center gap-1.5"
+                className="font-mono text-xs px-3.5 py-1.5 rounded-full border border-border bg-surface/80 text-white/80 hover:text-white hover:border-accent-cyan/50 hover:bg-surface-hover transition-all flex items-center gap-1.5 whitespace-nowrap"
               >
                 <svg
                   width="12"
@@ -101,7 +98,7 @@ export function Nav() {
             <Magnetic>
               <a
                 href="mailto:dev.avneeshkumar@gmail.com"
-                className="font-mono text-xs px-4 py-1.5 rounded-full bg-gradient-to-r from-accent-cyan to-accent-teal text-bg font-semibold hover:opacity-90 transition-all shadow-md shadow-accent-cyan/20"
+                className="font-mono text-xs px-4 py-1.5 rounded-full bg-gradient-to-r from-accent-cyan to-accent-teal text-bg font-semibold hover:opacity-90 transition-all shadow-md shadow-accent-cyan/20 whitespace-nowrap"
               >
                 Let&apos;s Talk
               </a>

@@ -1,84 +1,153 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { TextReveal } from "./reveal";
+import { TextReveal, Reveal } from "./reveal";
+import { Magnetic } from "./magnetic";
 
 export function Hero() {
   return (
-    <section className="relative min-h-screen flex flex-col justify-end px-8 pb-16 pt-32">
-      {/* Large background text */}
+    <section className="relative min-h-screen flex flex-col justify-center px-6 md:px-12 pt-32 pb-20 overflow-hidden bg-radial-glow">
+      {/* Background ambient data grid */}
+      <div className="absolute inset-0 bg-grid-pattern opacity-40 pointer-events-none" />
+
+      {/* Large faint background watermark */}
       <motion.div
         initial={{ opacity: 0 }}
-        animate={{ opacity: 0.03 }}
-        transition={{ duration: 2, delay: 1 }}
+        animate={{ opacity: 0.025 }}
+        transition={{ duration: 2, delay: 0.5 }}
         className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
       >
-        <span className="text-[20vw] font-black tracking-tighter text-white whitespace-nowrap">
-          BUILD
+        <span className="text-[22vw] font-black tracking-tighter text-white whitespace-nowrap">
+          ANALYTICS
         </span>
       </motion.div>
 
       <div className="relative z-10 max-w-[1400px] mx-auto w-full">
-        <div className="mb-8">
-          <TextReveal delay={0.2}>
-            <p className="font-mono text-sm text-accent tracking-wide">
-              Generative AI — Automation — Content Creation
-            </p>
-          </TextReveal>
+        {/* Eyebrow / Meta */}
+        <div className="mb-6">
+          <Reveal>
+            <div className="flex items-center gap-3 text-xs font-mono tracking-widest text-accent-cyan uppercase">
+              <span className="w-2 h-0.5 bg-accent-cyan" />
+              <span>Data Analytics & Engineering</span>
+              <span className="text-white/20">·</span>
+              <span className="text-white/40">ICFAI Tech</span>
+            </div>
+          </Reveal>
         </div>
 
-        <div className="mb-12">
-          <TextReveal delay={0.4}>
-            <h1 className="text-[clamp(3rem,8vw,8rem)] font-black leading-[0.9] tracking-tighter">
+        {/* Big Headline */}
+        <div className="mb-8">
+          <TextReveal delay={0.2}>
+            <p className="font-mono text-sm md:text-base text-accent-cyan tracking-wider uppercase mb-2">
+              Data Analyst · Analytics Engineer · ML Practitioner
+            </p>
+          </TextReveal>
+
+          <TextReveal delay={0.3}>
+            <h1 className="text-[clamp(3.2rem,8.5vw,7.5rem)] font-black leading-[0.92] tracking-tighter text-white">
               Avneesh
             </h1>
           </TextReveal>
-          <TextReveal delay={0.5}>
-            <h1 className="text-[clamp(3rem,8vw,8rem)] font-black leading-[0.9] tracking-tighter">
-              Kumar<span className="text-accent">.</span>
+          <TextReveal delay={0.4}>
+            <h1 className="text-[clamp(3.2rem,8.5vw,7.5rem)] font-black leading-[0.92] tracking-tighter text-white">
+              Kumar<span className="text-accent-cyan">.</span>
             </h1>
           </TextReveal>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-end">
-          <TextReveal delay={0.7}>
-            <p className="text-lg text-white/50 max-w-md leading-relaxed">
-              I build AI-powered tools, automate complex workflows, and create
-              cinematic content using generative AI. One person. Full pipeline.
-              From idea to shipped product — faster than most teams.
+        {/* Bio & Intro */}
+        <div className="max-w-3xl mb-14">
+          <Reveal delay={0.5}>
+            <p className="text-lg md:text-2xl text-white/70 font-light leading-relaxed">
+              I build <span className="text-white font-medium">real-time data pipelines</span>,{" "}
+              <span className="text-white font-medium">interactive BI dashboards</span>, and{" "}
+              <span className="text-white font-medium">graph anomaly detection platforms</span>.
+              Transforming high-velocity, complex data into actionable intelligence and explainable machine learning models.
             </p>
-          </TextReveal>
+          </Reveal>
 
-          <TextReveal delay={0.9}>
-            <a
-              href="#work"
-              className="inline-flex items-center gap-2 mt-6 px-5 py-2.5 text-sm font-medium border border-accent/40 text-accent rounded-full hover:bg-accent/10 transition-all duration-300"
-            >
-              See my work
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="5" y1="12" x2="19" y2="12" />
-                <polyline points="12 5 19 12 12 19" />
-              </svg>
-            </a>
-          </TextReveal>
+          {/* CTAs */}
+          <Reveal delay={0.6}>
+            <div className="flex flex-wrap items-center gap-4 mt-8">
+              <Magnetic>
+                <a
+                  href="#projects"
+                  className="inline-flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-full bg-gradient-to-r from-accent-cyan to-accent-teal text-bg hover:shadow-lg hover:shadow-accent-cyan/25 transition-all duration-300"
+                >
+                  View Featured Projects
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <polyline points="12 5 19 12 12 19" />
+                  </svg>
+                </a>
+              </Magnetic>
 
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 1, delay: 1.2 }}
-            className="flex justify-end"
-          >
-            <div className="flex flex-col items-end gap-2 text-right">
-              <span className="text-sm text-white/30">Based in</span>
-              <span className="text-sm text-white/70">Hyderabad, India</span>
-              <span className="text-sm text-white/30 mt-2">Scroll</span>
-              <motion.div
-                animate={{ y: [0, 8, 0] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-                className="w-[1px] h-8 bg-accent/50"
-              />
+              <Magnetic>
+                <a
+                  href="/Avneesh_Kumar_Resume.docx"
+                  download="Avneesh_Kumar_Resume.docx"
+                  className="inline-flex items-center gap-2 px-5 py-3 text-sm font-medium border border-border hover:border-accent-cyan/50 text-white/90 bg-surface/80 rounded-full hover:bg-surface-hover transition-all duration-300"
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="text-accent-cyan"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download CV
+                </a>
+              </Magnetic>
+
+              <Magnetic>
+                <a
+                  href="#terminal"
+                  className="inline-flex items-center gap-1.5 px-4 py-3 text-sm font-mono text-white/50 hover:text-accent-cyan transition-colors"
+                >
+                  <span>$ live_query_test</span>
+                  <span className="text-accent-cyan">↗</span>
+                </a>
+              </Magnetic>
             </div>
-          </motion.div>
+          </Reveal>
+        </div>
+
+        {/* Scroll indicator */}
+        <div className="flex items-center justify-between pt-6 border-t border-border/40 text-xs font-mono text-white/40">
+          <div className="flex items-center gap-4">
+            <span className="text-white/60">Hyderabad, India</span>
+            <span>·</span>
+            <span className="text-accent-cyan/80">dev.avneeshkumar@gmail.com</span>
+          </div>
+
+          <a
+            href="#about"
+            className="flex items-center gap-2 hover:text-accent-cyan transition-colors"
+          >
+            <span>SCROLL TO EXPLORE</span>
+            <motion.div
+              animate={{ y: [0, 5, 0] }}
+              transition={{ duration: 1.5, repeat: Infinity }}
+              className="w-1.5 h-1.5 rounded-full bg-accent-cyan"
+            />
+          </a>
         </div>
       </div>
     </section>

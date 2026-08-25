@@ -24,43 +24,45 @@ export function Hero() {
       </motion.div>
 
       <div className="relative z-10 max-w-[1400px] mx-auto w-full">
-        {/* Eyebrow / Meta */}
-        <div className="mb-6">
-          <Reveal>
-            <div className="flex items-center gap-3 text-xs font-mono tracking-widest text-accent-cyan uppercase">
-              <span className="w-2 h-0.5 bg-accent-cyan" />
-              <span>Data Analytics & Engineering</span>
-              <span className="text-white/20">·</span>
-              <span className="text-white/40">ICFAI Tech</span>
+        {/* Main Hero Two-Column Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center mb-14">
+          {/* Left Column: Eyebrow + Headline + Bio + CTAs */}
+          <div className="lg:col-span-7 flex flex-col justify-center">
+            {/* Eyebrow / Meta */}
+            <div className="mb-4">
+              <Reveal>
+                <div className="flex items-center gap-3 text-xs font-mono tracking-widest text-accent-cyan uppercase">
+                  <span className="w-2 h-0.5 bg-accent-cyan" />
+                  <span>Data Analytics & Engineering</span>
+                  <span className="text-white/20">·</span>
+                  <span className="text-white/40">ICFAI Tech</span>
+                </div>
+              </Reveal>
             </div>
-          </Reveal>
-        </div>
 
-        {/* Big Headline */}
-        <div className="mb-8">
-          <TextReveal delay={0.2}>
-            <p className="font-mono text-sm md:text-base text-accent-cyan tracking-wider uppercase mb-2">
-              Data Analyst · Analytics Engineer · ML Practitioner
-            </p>
-          </TextReveal>
+            {/* Big Headline */}
+            <div className="mb-6">
+              <TextReveal delay={0.1}>
+                <p className="font-mono text-xs sm:text-sm md:text-base text-accent-cyan tracking-wider uppercase mb-2">
+                  Data Analyst · Analytics Engineer · ML Practitioner
+                </p>
+              </TextReveal>
 
-          <TextReveal delay={0.3}>
-            <h1 className="text-[clamp(3.2rem,8.5vw,7.5rem)] font-black leading-[0.92] tracking-tighter text-white">
-              Avneesh
-            </h1>
-          </TextReveal>
-          <TextReveal delay={0.4}>
-            <h1 className="text-[clamp(3.2rem,8.5vw,7.5rem)] font-black leading-[0.92] tracking-tighter text-white">
-              Kumar<span className="text-accent-cyan">.</span>
-            </h1>
-          </TextReveal>
-        </div>
+              <TextReveal delay={0.2}>
+                <h1 className="text-[clamp(2.8rem,6.8vw,6.2rem)] font-black leading-[0.92] tracking-tighter text-white">
+                  Avneesh
+                </h1>
+              </TextReveal>
+              <TextReveal delay={0.3}>
+                <h1 className="text-[clamp(2.8rem,6.8vw,6.2rem)] font-black leading-[0.92] tracking-tighter text-white">
+                  Kumar<span className="text-accent-cyan">.</span>
+                </h1>
+              </TextReveal>
+            </div>
 
-        {/* Bio & Photo Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center mb-14">
-          <div className="lg:col-span-7">
-            <Reveal delay={0.5}>
-              <p className="text-lg md:text-xl text-white/70 font-light leading-relaxed max-w-2xl">
+            {/* Bio & Intro */}
+            <Reveal delay={0.4}>
+              <p className="text-base md:text-lg text-white/70 font-light leading-relaxed max-w-xl">
                 I build <span className="text-white font-medium">real-time data pipelines</span>,{" "}
                 <span className="text-white font-medium">interactive BI dashboards</span>, and{" "}
                 <span className="text-white font-medium">graph anomaly detection platforms</span>.
@@ -69,7 +71,7 @@ export function Hero() {
             </Reveal>
 
             {/* CTAs */}
-            <Reveal delay={0.6}>
+            <Reveal delay={0.5}>
               <div className="flex flex-wrap items-center gap-4 mt-8">
                 <Magnetic>
                   <a
@@ -131,12 +133,12 @@ export function Hero() {
             </Reveal>
           </div>
 
-          {/* Portrait Photo Column */}
+          {/* Right Column: Portrait Photo starting right at the top */}
           <div className="lg:col-span-5 flex justify-center lg:justify-end">
-            <Reveal delay={0.5}>
-              <div className="relative group max-w-[300px] sm:max-w-[340px] w-full">
+            <Reveal delay={0.3}>
+              <div className="relative group w-full max-w-[320px] sm:max-w-[360px] lg:max-w-[380px]">
                 {/* Subtle glowing backlight */}
-                <div className="absolute -inset-1 bg-gradient-to-r from-accent-cyan/20 to-accent-teal/10 rounded-3xl blur-xl opacity-40 group-hover:opacity-70 transition duration-500" />
+                <div className="absolute -inset-1 bg-gradient-to-r from-accent-cyan/20 to-accent-teal/10 rounded-3xl blur-2xl opacity-40 group-hover:opacity-70 transition duration-500" />
 
                 {/* Image frame */}
                 <div className="relative rounded-2xl border border-border bg-surface-card overflow-hidden shadow-2xl">
@@ -146,7 +148,7 @@ export function Hero() {
                     width={800}
                     height={1420}
                     priority
-                    className="w-full h-[380px] sm:h-[420px] object-cover object-top transition-transform duration-500 group-hover:scale-[1.02]"
+                    className="w-full h-[440px] sm:h-[490px] lg:h-[520px] object-cover object-top transition-transform duration-500 group-hover:scale-[1.02]"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-transparent to-transparent opacity-60" />
 

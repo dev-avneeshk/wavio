@@ -73,8 +73,8 @@ export function Nav() {
           <div className="hidden sm:flex items-center gap-3 flex-shrink-0">
             <Magnetic>
               <a
-                href="/Avneesh_Kumar_Resume.docx"
-                download="Avneesh_Kumar_Resume.docx"
+                href="/Avneesh_Kumar_Resume.pdf"
+                download="Avneesh_Kumar_Resume.pdf"
                 className="font-mono text-xs px-3.5 py-1.5 rounded-full border border-border bg-surface/80 text-white/80 hover:text-white hover:border-accent-cyan/50 hover:bg-surface-hover transition-all flex items-center gap-1.5 whitespace-nowrap"
               >
                 <svg
@@ -162,8 +162,8 @@ export function Nav() {
               ))}
               <div className="pt-2 flex flex-col gap-2">
                 <a
-                  href="/Avneesh_Kumar_Resume.docx"
-                  download="Avneesh_Kumar_Resume.docx"
+                  href="/Avneesh_Kumar_Resume.pdf"
+                  download="Avneesh_Kumar_Resume.pdf"
                   className="w-full text-center font-mono text-xs py-2.5 rounded-lg border border-border bg-surface-card text-white flex items-center justify-center gap-2"
                 >
                   <svg

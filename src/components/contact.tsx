@@ -119,8 +119,8 @@ export function Contact() {
             <Reveal delay={0.4}>
               <div className="pt-2">
                 <a
-                  href="/Avneesh_Kumar_Resume.docx"
-                  download="Avneesh_Kumar_Resume.docx"
+                  href="/Avneesh_Kumar_Resume.pdf"
+                  download="Avneesh_Kumar_Resume.pdf"
                   className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-surface border border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/10 font-mono text-xs transition-all"
                 >
                   <svg
@@ -137,7 +137,7 @@ export function Contact() {
                     <polyline points="7 10 12 15 17 10" />
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                  <span>Download Complete Resume (.docx)</span>
+                  <span>Download Complete Resume (PDF)</span>
                 </a>
               </div>
             </Reveal>

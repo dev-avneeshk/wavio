@@ -97,8 +97,8 @@ export function Hero() {
 
                 <Magnetic>
                   <a
-                    href="/Avneesh_Kumar_Resume.docx"
-                    download="Avneesh_Kumar_Resume.docx"
+                    href="/Avneesh_Kumar_Resume.pdf"
+                    download="Avneesh_Kumar_Resume.pdf"
                     className="inline-flex items-center gap-2 px-5 py-3 text-sm font-medium border border-border hover:border-accent-cyan/50 text-white/90 bg-surface/80 rounded-full hover:bg-surface-hover transition-all duration-300"
                   >
                     <svg

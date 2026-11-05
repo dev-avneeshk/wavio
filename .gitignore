@@ -35,3 +35,10 @@ next-env.d.ts
 
 # reference video (too big for git / the deploy)
 /house_city_en_v3.mp4
+
+# Supabase CLI scratch files
+supabase/.temp/
+
+# all env files except the template
+.env*
+!.env.example

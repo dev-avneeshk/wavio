@@ -1,0 +1,9 @@
+# Files never uploaded by `vercel deploy`.
+# reference video (92 MB, not part of the site)
+house_city_en_v3.mp4
+*.mp4
+# secrets: set these in Vercel -> Settings -> Environment Variables instead
+.env
+.env*.local
+# local tooling
+.kiro

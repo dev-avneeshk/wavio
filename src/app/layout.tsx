@@ -1,70 +1,25 @@
-import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import { site } from "@/lib/site";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const mono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-  display: "swap",
-});
-
-export const viewport: Viewport = {
-  themeColor: "#08090d",
-  width: "device-width",
-  initialScale: 1,
-};
+const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
+const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Avneesh Kumar | Data Analyst & Analytics Engineer",
-  description:
-    "Data Analyst with hands-on experience in SQL, Python, Power BI, data pipelines, machine learning, Neo4j graph analytics, and real-time analytics dashboards.",
-  keywords: [
-    "Avneesh Kumar",
-    "Data Analyst",
-    "Analytics Engineer",
-    "SQL",
-    "Python",
-    "Power BI",
-    "Neo4j",
-    "Graph Analytics",
-    "ETL Pipelines",
-    "Anomaly Detection",
-    "Machine Learning",
-    "Portfolio",
-  ],
-  authors: [{ name: "Avneesh Kumar", url: "https://dev.avneeshkumar@gmail.com" }],
-  creator: "Avneesh Kumar",
-  openGraph: {
-    type: "website",
-    locale: "en_US",
-    url: "https://wavio.codes",
-    title: "Avneesh Kumar | Data Analyst & Analytics Engineer",
-    description:
-      "Transforming complex data into real-time intelligence, predictive systems, and automated graph/anomaly detection platforms.",
-    siteName: "Avneesh Kumar Portfolio",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "Avneesh Kumar | Data Analyst & Analytics Engineer",
-    description:
-      "Specializing in SQL, Python, Power BI, real-time data pipelines, and graph analytics.",
-  },
+  title: site.pageTitle,
+  description: site.description,
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable} scroll-smooth dark`}>
-      <body className="font-sans bg-bg text-slate-100 antialiased selection:bg-accent-cyan/20 selection:text-accent-cyan">
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className="min-h-[100dvh]">
+        {/* Faint street-map dot grid, fixed so it never repaints on scroll. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0 [background-image:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.07)_1px,transparent_0)] [background-size:28px_28px] [mask-image:radial-gradient(ellipse_at_70%_45%,black,transparent_72%)]"
+        />
         {children}
       </body>
     </html>

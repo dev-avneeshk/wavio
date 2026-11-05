@@ -1,8 +1,9 @@
 import { signOut } from "@/app/actions";
 import { GoogleButton } from "@/components/google-button";
-import { CheckIcon, HouseGlyph } from "@/components/icons";
+import { CheckIcon, HouseGlyph, PaintRollerIcon } from "@/components/icons";
 import { InstagramForm } from "@/components/instagram-form";
 import { Land } from "@/components/land/land";
+import { ShellFrame } from "@/components/shell-frame";
 import { site } from "@/lib/site";
 import { TOWN_SIZE, nextPlot, plotInTown, townOf, type MyHouse, type WorldView } from "@/lib/world";
 
@@ -16,54 +17,48 @@ type ShellProps = {
 };
 
 export function Shell({ step, signedIn, view, children }: ShellProps) {
-  return (
-    <main className="relative min-h-[100dvh] md:h-[100dvh] md:overflow-hidden">
-      {/* The world: full screen behind the card on desktop, the top of the page on phones. */}
-      <div className="relative h-[58dvh] min-h-[360px] md:absolute md:inset-0 md:h-auto">
-        <Land view={view} />
+  const next = nextPlot(view);
+  const summary = view.me
+    ? `House #${fmt(view.me.plot)} · being built in ${site.townName(townOf(view.me.plot))}`
+    : `${site.headline.replace(/\.$/, "")} · #${fmt(next)} is next`;
+
+  const header = (
+    <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between p-3 md:p-6">
+      <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-white/90 py-1.5 pl-1.5 pr-4 shadow-[0_6px_20px_-10px_rgba(0,0,0,0.45)] backdrop-blur">
+        <span className="grid size-7 place-items-center rounded-full bg-accent text-white">
+          <HouseGlyph className="size-4" />
+        </span>
+        <span className="text-sm font-semibold tracking-tight text-zinc-900">{site.brand}</span>
       </div>
+      {signedIn && (
+        <form action={signOut} className="pointer-events-auto">
+          <button
+            type="submit"
+            className="rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-zinc-700 shadow-[0_6px_20px_-10px_rgba(0,0,0,0.45)] backdrop-blur transition-colors hover:bg-white hover:text-zinc-950 active:scale-[0.98]"
+          >
+            Sign out
+          </button>
+        </form>
+      )}
+    </header>
+  );
 
-      <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between p-3 md:p-6">
-        <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-white/90 py-1.5 pl-1.5 pr-4 shadow-[0_6px_20px_-10px_rgba(0,0,0,0.45)] backdrop-blur">
-          <span className="grid size-7 place-items-center rounded-full bg-accent text-white">
-            <HouseGlyph className="size-4" />
-          </span>
-          <span className="text-sm font-semibold tracking-tight text-zinc-900">{site.brand}</span>
-        </div>
-        {signedIn && (
-          <form action={signOut} className="pointer-events-auto">
-            <button
-              type="submit"
-              className="rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-zinc-700 shadow-[0_6px_20px_-10px_rgba(0,0,0,0.45)] backdrop-blur transition-colors hover:bg-white hover:text-zinc-950 active:scale-[0.98]"
-            >
-              Sign out
-            </button>
-          </form>
-        )}
-      </header>
+  return (
+    <ShellFrame map={<Land view={view} />} header={header} top={<Counter view={view} />} summary={summary}>
+      <h1 className="mt-4 text-3xl font-semibold leading-[0.98] tracking-tighter text-zinc-950 md:text-[2.5rem]">
+        {site.headline}
+      </h1>
+      <p className="mt-3 text-[15px] leading-relaxed text-zinc-600">{site.description}</p>
 
-      <section className="relative z-10 -mt-6 px-3 pb-6 md:absolute md:left-6 md:top-20 md:mt-0 md:w-[420px] md:px-0 md:pb-0">
-        <div
-          id="waitlist-card"
-          className="animate-rise rounded-[1.75rem] border border-black/5 bg-white/95 p-6 shadow-[0_24px_60px_-28px_rgba(30,40,50,0.55)] backdrop-blur-md md:max-h-[calc(100dvh-6.5rem)] md:overflow-y-auto"
-        >
-          <Counter view={view} />
-          <h1 className="mt-4 text-3xl font-semibold leading-[0.98] tracking-tighter text-zinc-950 md:text-[2.5rem]">
-            {site.headline}
-          </h1>
-          <p className="mt-3 text-[15px] leading-relaxed text-zinc-600">{site.description}</p>
+      <Steps current={step} />
 
-          <Steps current={step} />
+      <div className="mt-6">{children}</div>
 
-          <div className="mt-6">{children}</div>
-
-          <div className="mt-6 flex flex-col gap-1 border-t border-zinc-200/80 pt-4 text-xs leading-relaxed text-zinc-500">
-            <p>{site.privacyNote}</p>
-            <p>{site.oneEntryNote}</p>
-          </div>
-        </div>
-      </section>
-    </main>
+      <div className="mt-6 flex flex-col gap-1 border-t border-zinc-200/80 pt-4 text-xs leading-relaxed text-zinc-500">
+        <p>{site.privacyNote}</p>
+        <p>{site.oneEntryNote}</p>
+      </div>
+    </ShellFrame>
   );
 }
 
@@ -157,6 +152,18 @@ export function OnListPanel({ me, email }: { me: MyHouse; email: string | null }
         Your house is being built on plot {fmt(plotInTown(me.plot))} of {fmt(TOWN_SIZE)} in {town}. It&apos;s the one with
         the crane and the yellow pin.
       </p>
+      <div className="flex items-center gap-3 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white text-zinc-700 shadow-[0_2px_6px_-3px_rgba(0,0,0,0.25)]">
+          <PaintRollerIcon className="size-[18px]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-zinc-900">{site.customizeTitle}</p>
+          <p className="text-xs leading-snug text-zinc-500">{site.customizeNote}</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-zinc-900 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
+          Soon
+        </span>
+      </div>
       <dl className="grid grid-cols-1 gap-3 border-t border-zinc-200/80 pt-4 text-sm sm:grid-cols-2">
         <div className="min-w-0">
           <dt className="text-zinc-500">Instagram</dt>

@@ -12,10 +12,12 @@ export type LandProps = {
 };
 
 // The page card covers the left side of the map on wide screens; tell the camera how much.
+// Collapsed, it's a small pill in the corner, so the map gets the whole width.
 const cardInset = () => {
   if (window.innerWidth < 768) return 0;
   const card = document.getElementById("waitlist-card");
-  return card ? card.getBoundingClientRect().right + 16 : 0;
+  if (!card || card.dataset.collapsed === "true") return 0;
+  return card.getBoundingClientRect().right + 16;
 };
 
 // Another town's houses, fetched when you move the camera there.
@@ -49,7 +51,12 @@ export default function LandView({ view }: LandProps) {
       return;
     }
     engineRef.current = engine;
+    // Re-centre the camera when the card is collapsed or opened.
+    const card = document.getElementById("waitlist-card");
+    const ro = card ? new ResizeObserver(() => engine.relayout()) : null;
+    if (card) ro?.observe(card);
     return () => {
+      ro?.disconnect();
       engineRef.current = null;
       engine.dispose();
     };

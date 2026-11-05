@@ -8,6 +8,8 @@ export const site = {
   steps: ["Sign in with Google", "Add your Instagram", "Your house goes up"],
   privacyNote: "Your Instagram username is shown on your house. Your Google name and email stay private.",
   oneEntryNote: "One house per Google account and per Instagram account.",
+  customizeTitle: "Customize your house",
+  customizeNote: "Customization will be available soon.",
   // Town 1 is the first town; rename towns here.
   townName: (n: number) => `Town ${n}`,
 } as const;

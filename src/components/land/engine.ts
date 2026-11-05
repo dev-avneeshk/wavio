@@ -277,6 +277,8 @@ export class LandEngine {
   private io: IntersectionObserver;
   private width = 1;
   private height = 1;
+  private inset = -1; // pixels of the left edge covered by the card, eased towards insetGoal
+  private insetGoal = 0;
   private tmp = new THREE.Vector3();
   private ray = new THREE.Raycaster();
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -939,6 +941,11 @@ export class LandEngine {
 
   // ---------- frame ----------
 
+  // The page layout changed (e.g. the card was collapsed): re-measure.
+  relayout() {
+    this.resize();
+  }
+
   private resize() {
     const w = Math.max(1, this.host.clientWidth);
     const h = Math.max(1, this.host.clientHeight);
@@ -947,12 +954,19 @@ export class LandEngine {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.fov = w / h < 0.9 ? 55 : 42;
-    const inset = clamp(this.opts.leftInset(), 0, w * 0.6);
-    // Shift the image right by half the covered strip so the focus sits centred in the open area.
-    if (inset > 0) this.camera.setViewOffset(w, h, -inset / 2, 0, w, h);
+    this.insetGoal = clamp(this.opts.leftInset(), 0, w * 0.6);
+    // The first measurement applies at once; later changes ease in from the frame loop.
+    if (this.inset < 0) this.inset = this.insetGoal;
+    this.applyInset();
+    if (this.maxTown) this.controls.maxDistance = this.worldView().radius * 1.3;
+  }
+
+  // Shift the image right by half the covered strip so the focus sits centred in the open area.
+  private applyInset() {
+    const { width: w, height: h } = this;
+    if (this.inset > 0.5) this.camera.setViewOffset(w, h, -this.inset / 2, 0, w, h);
     else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
-    if (this.maxTown) this.controls.maxDistance = this.worldView().radius * 1.3;
   }
 
   private placeTag(tag: { el: HTMLDivElement }, x: number, y: number, z: number, show: boolean, opacity = 1) {
@@ -978,6 +992,12 @@ export class LandEngine {
       return;
     }
     this.raf = requestAnimationFrame(this.loop);
+
+    if (Math.abs(this.insetGoal - this.inset) > 0.5) {
+      this.inset = this.reduced ? this.insetGoal : this.inset + (this.insetGoal - this.inset) * 0.14;
+      if (Math.abs(this.insetGoal - this.inset) <= 0.5) this.inset = this.insetGoal;
+      this.applyInset();
+    }
 
     if (this.flight) {
       if (now >= this.flight.t0) this.stepFlight(now);

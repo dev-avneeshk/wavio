@@ -1,6 +1,6 @@
-// Builds the whole land as a few merged meshes: countryside, roads, the central plaza, parks,
-// empty pegged plots, and one house per waitlist entry (its look comes from the Instagram username).
-// House and prop shapes are ported from the House City reel.
+// Builds one town in full detail as a few merged meshes: roads, the central plaza, parks, empty
+// pegged plots, and a construction site for every house on the waitlist. A house's look and how far
+// along it is come from its house number, so it never changes. Shapes are ported from the reel.
 import * as THREE from "three";
 import { Builder, C, T, roofTpl, rot, type Tpl } from "./geo";
 import {
@@ -9,8 +9,6 @@ import {
   BZ,
   DOORS,
   FH,
-  GLASS,
-  GRASS,
   LAWN,
   LW,
   PER_ROW,
@@ -18,22 +16,20 @@ import {
   PZ,
   ROAD,
   ROOFS,
-  TRIM,
+  TOWN_HALF,
+  TOWN_RINGS,
   WALK,
   WALLS,
   Y0,
-  blockC,
-  cityHalf,
   hashStr,
   isPark,
   isPlaza,
   lotAt,
   lotForPlot,
-  lotKey,
   pick,
   ringOf,
-  ringsToDraw,
   rng,
+  townCenter,
   type Lot,
   type Row,
 } from "./layout";
@@ -43,13 +39,38 @@ const PINE = ["#3E8E4A", "#2F7D45", "#47975A"];
 const HEDGE = "#4E9E3E";
 const POLE = "#3C4148";
 
-type Adder = Pick<Builder, "add" | "addE">;
+// Building-site colours.
+const CONCRETE = "#C9C3B7";
+const SLAB = "#B5AFA4";
+const TIMBER = "#C99A5B";
+const TUBE = "#9AA4AE";
+const PLANK = "#B98B55";
+const FENCE = "#F08A3C";
+const HOLE = "#40454D";
+const DIRT = "#C8AD83";
+const BRICK = "#B4573F";
+const SAND = "#DCC38C";
+export const CRANE = "#F2B705";
+
+export type Adder = Pick<Builder, "add" | "addE">;
 
 // Places a sub-model (built around its own origin) at (ox, oy, oz) with uniform scale s.
-const placed = (b: Builder, ox: number, oy: number, oz: number, s: number): Adder => ({
+export const placed = (b: Adder, ox: number, oy: number, oz: number, s: number): Adder => ({
   add: (t: Tpl, x, y, z, sx, sy, sz, ry, col) => b.add(t, ox + x * s, oy + y * s, oz + z * s, sx * s, sy * s, sz * s, ry, col),
   addE: (t: Tpl, x, y, z, sx, sy, sz, ax, ay, az, col) =>
     b.addE(t, ox + x * s, oy + y * s, oz + z * s, sx * s, sy * s, sz * s, ax, ay, az, col),
+});
+
+// Same, turned by ry around the vertical axis.
+const turned = (b: Adder, ox: number, oy: number, oz: number, ry: number): Adder => ({
+  add: (t: Tpl, x, y, z, sx, sy, sz, r, col) => {
+    const [dx, dz] = rot(x, z, ry);
+    b.add(t, ox + dx, oy + y, oz + dz, sx, sy, sz, r + ry, col);
+  },
+  addE: (t: Tpl, x, y, z, sx, sy, sz, ax, ay, az, col) => {
+    const [dx, dz] = rot(x, z, ry);
+    b.addE(t, ox + dx, oy + y, oz + dz, sx, sy, sz, ax, ay + ry, az, col);
+  },
 });
 
 export const addTree = (b: Adder, x: number, y: number, z: number, s: number, r: () => number) => {
@@ -84,8 +105,12 @@ const addBench = (b: Adder, x: number, y: number, z: number, ry: number) => {
   P(0.9, 0.24, 0, 0.12, 0.48, 0.6, POLE);
 };
 
+// ---------- houses being built ----------
+
 type RoofKind = "gable" | "hip" | "flat";
-type HouseSpec = {
+export type Stage = 0 | 1 | 2; // 0: foundations + frame, 1: walls going up, 2: roof going on
+
+export type HouseSpec = {
   x: number;
   z: number;
   rot: number;
@@ -97,172 +122,295 @@ type HouseSpec = {
   wall: string;
   roofC: string;
   door: string;
-  chimney: boolean;
+  stage: Stage;
+  wallH: number; // how high the walls are so far
+  frameTop: number; // top of the frame / the floor being worked on
   detail: boolean;
-  tree: 0 | 1 | 2;
-  hedge: boolean;
 };
 
-const YARD = (d: number) => BZ / 2 - 1.6 - 8 - d / 2 - 0.6;
+export const YARD = (d: number) => BZ / 2 - 1.6 - 8 - d / 2 - 0.6;
 
-// One house; its front faces local +z. yard = distance from the front wall to the lot's front edge.
-const addHouse = (b: Adder, h: HouseSpec, yard: number, lw: number, r: () => number) => {
-  const { x, z, rot: ry, w, d, floors, rh } = h;
-  const P = (lx: number, ly: number, lz: number, sx: number, sy: number, sz: number, col: string, tpl = T.box, extra = 0) => {
-    const [ox, oz] = rot(lx, lz, ry);
-    b.add(tpl, x + ox, Y0 + ly, z + oz, sx, sy, sz, ry + extra, C(col));
-  };
-  const bodyH = floors * FH;
-  const top = 0.4 + bodyH;
-  P(0, 0.2, 0, w + 0.5, 0.4, d + 0.5, "#CFC6B5");
-  P(0, 0.4 + bodyH / 2, 0, w, bodyH, d, h.wall);
-  if (h.detail) {
-    for (let f = 1; f < floors; f++) P(0, 0.4 + FH * f, 0, w + 0.16, 0.22, d + 0.16, TRIM);
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) P((sx * w) / 2, 0.4 + bodyH / 2, (sz * d) / 2, 0.32, bodyH, 0.32, TRIM);
-  }
-  if (h.roof === "gable") {
-    P(0, top, 0, w, rh * 0.97, d, h.wall, roofTpl(0.5));
-    P(0, top - 0.12, 0, w + 0.3, 0.26, d + 0.3, TRIM);
-    const half = d / 2;
-    const Ls = Math.hypot(rh, half);
-    const a = Math.atan2(rh, half);
-    const len = Ls + 0.8;
-    for (const sgn of [1, -1]) {
-      const lz = sgn * ((half / Ls) * (len / 2) + (rh / Ls) * 0.16) - sgn * 0.02;
-      const ly = top + rh - (rh / Ls) * (len / 2) + (half / Ls) * 0.16;
-      const [ox, oz] = rot(0, lz, ry);
-      b.addE(T.box, x + ox, Y0 + ly, z + oz, w + 0.9, 0.32, len, sgn * a, ry, 0, C(h.roofC));
-    }
-    P(0, top + rh + 0.12, 0, w + 0.95, 0.24, 0.5, h.roofC);
-  } else if (h.roof === "hip") {
-    const rw = w + 0.9;
-    const rd = d + 0.9;
-    P(0, top - 0.12, 0, w + 0.3, 0.26, d + 0.3, TRIM);
-    P(0, top, 0, rw, rh, rd, h.roofC, roofTpl(Math.max(0, 0.5 - (0.5 * rd) / rw)));
-  } else {
-    P(0, top + 0.12, 0, w + 0.7, 0.36, d + 0.7, TRIM);
-    P(0, top + 0.42, 0, w + 0.5, 0.3, d + 0.5, h.roofC);
-  }
-  if (h.chimney && h.roof !== "flat") {
-    P(w * 0.28, top + rh * 0.5 + 0.6, -d * 0.14, 0.9, rh + 1.2, 0.9, "#9C6B52");
-    P(w * 0.28, top + rh + 1.25, -d * 0.14, 1.1, 0.22, 1.1, "#7E5644");
-  }
-  const du = w > 9.6 ? -w * 0.2 : -w * 0.16;
-  const nF = Math.max(2, Math.floor((w - 1) / 2.5));
-  const nS = Math.max(1, Math.floor((d - 1) / 3.3));
-  const us = (n: number, span: number) => Array.from({ length: n }, (_, k) => (k - (n - 1) / 2) * (span / n));
-  const win = (face: "F" | "B" | "L" | "R", u: number, ly: number) => {
-    const ext = face === "F" ? 0 : face === "B" ? Math.PI : face === "L" ? -Math.PI / 2 : Math.PI / 2;
-    const off = face === "F" || face === "B" ? d / 2 : w / 2;
-    const L = (uu: number, nn: number): [number, number] => rot(uu, off + nn, ext);
-    if (h.detail) {
-      const q = (uu: number, nn: number, yy: number, sx: number, sy: number, sz: number, col: string) => {
-        const [lx, lz] = L(uu, nn);
-        P(lx, yy, lz, sx, sy, sz, col, T.box, ext);
-      };
-      q(u, 0.05, ly, 1.5, 1.75, 0.14, TRIM);
-      q(u, 0.09, ly, 1.16, 1.4, 0.1, GLASS);
-      q(u, 0.14, ly, 0.09, 1.4, 0.04, TRIM);
-      q(u, 0.14, ly + 0.1, 1.16, 0.09, 0.04, TRIM);
-      q(u, 0.13, ly - 0.93, 1.75, 0.14, 0.3, TRIM);
-    } else {
-      const [lx, lz] = L(u, 0.03);
-      P(lx, ly, lz, 1.4, 1.6, 1, TRIM, T.quadZ, ext);
-      const [gx, gz] = L(u, 0.05);
-      P(gx, ly, gz, 1.08, 1.28, 1, GLASS, T.quadZ, ext);
-    }
-  };
-  for (let f = 0; f < floors; f++) {
-    const ly = 0.4 + FH * f + 1.6;
-    for (const u of us(nF, w)) {
-      if (!(f === 0 && Math.abs(u - du) < 1.6)) win("F", u, ly);
-      if (h.detail || f > 0) win("B", u, ly);
-    }
-    for (const u of us(h.detail ? nS : 1, d)) {
-      win("L", u, ly);
-      win("R", u, ly);
-    }
-  }
-  if (h.detail) {
-    P(du, 0.4 + 1.27, d / 2 + 0.05, 1.55, 2.55, 0.14, TRIM);
-    P(du, 0.4 + 1.17, d / 2 + 0.1, 1.15, 2.3, 0.1, h.door);
-    P(du + 0.38, 0.4 + 1.15, d / 2 + 0.17, 0.12, 0.12, 0.06, "#E8C35A");
-    const [ox, oz] = rot(du, d / 2 + 0.55, ry);
-    b.addE(T.box, x + ox, Y0 + 0.4 + 2.85, z + oz, 2.3, 0.14, 1.15, 0.32, ry, 0, C(h.roofC));
-  } else {
-    P(du, 0.4 + 1.15, d / 2 + 0.04, 1.1, 2.2, 1, h.door, T.quadZ);
-  }
-  P(du, 0.15, d / 2 + 0.55, 1.8, 0.3, 0.9, "#D6CFC2");
-  if (yard > 1) P(du, 0.03, d / 2 + 0.6 + yard / 2, 1.3, 0.06, yard, WALK);
-  if (h.hedge && yard > 2.5) {
-    for (const sg of [-1, 1]) {
-      const a = sg < 0 ? -lw / 2 + 0.5 : du + 0.95;
-      const e = sg < 0 ? du - 0.95 : lw / 2 - 0.5;
-      if (e - a > 1) P((a + e) / 2, 0.5, d / 2 + yard - 0.4, e - a, 1.0, 0.85, HEDGE);
-    }
-  }
-  const tp = (lx: number, lz: number): [number, number] => {
-    const [ox, oz] = rot(lx, lz, ry);
-    return [x + ox, z + oz];
-  };
-  if (h.tree === 1 && yard > 3) {
-    const [tx, tz] = tp(Math.min(w * 0.28, lw / 2 - 1.8), d / 2 + Math.min(3.2, yard * 0.5));
-    addTree(b, tx, Y0, tz, 0.95 + r() * 0.2, r);
-  } else if (h.tree === 2 && yard > 3) {
-    for (const sg of [-1, 1]) {
-      const [tx, tz] = tp(sg * Math.min(w * 0.36, lw / 2 - 1.4), d / 2 + Math.min(2.4, yard * 0.4));
-      addPine(b, tx, Y0, tz, 0.85 + r() * 0.2, r);
-    }
-  }
-  if (r() < 0.45) {
-    const [tx, tz] = tp((r() - 0.5) * w * 0.7, -d / 2 - 3.2);
-    addTree(b, tx, Y0, tz, 0.9 + r() * 0.3, r);
-  }
-};
-
-// The same username always gets the same house.
-const houseSpec = (name: string, lot: Lot, x: number, z: number): { h: HouseSpec; r: () => number } => {
-  const r = rng(hashStr(`house:${name}`));
+// The same house number always gets the same house at the same stage.
+export const houseSpec = (plot: number, lot: Lot, x: number, z: number): HouseSpec => {
+  const r = rng(hashStr(`house:${plot}`));
   const ring = lot.ring;
-  const floors = ring <= 1 ? pick(r, [2, 2, 3, 2, 3]) : ring <= 4 ? pick(r, [1, 2, 2, 2]) : pick(r, [1, 1, 2, 2]);
+  const floors = ring <= 1 ? pick(r, [2, 2, 3, 2, 3]) : ring <= 3 ? pick(r, [1, 2, 2, 2]) : pick(r, [1, 1, 2, 2]);
   const roof: RoofKind =
     floors === 3
       ? r() < 0.55
         ? "flat"
         : "hip"
       : pick(r, ring <= 3 ? (["gable", "gable", "hip", "flat"] as const) : (["gable", "gable", "hip"] as const));
-  const h: HouseSpec = {
-    x,
-    z,
-    rot: lot.rot,
-    w: Math.max(7.2, LW - 1.5 - r() * 1.3),
-    d: 7.6 + r() * 1.4,
-    floors,
-    rh: roof === "gable" ? 2.5 + r() * 1.1 : roof === "hip" ? 1.8 + r() * 1.3 : 0,
-    roof,
-    wall: pick(r, WALLS),
-    roofC: pick(r, ROOFS),
-    door: pick(r, DOORS),
-    chimney: r() < 0.3,
-    detail: ring <= 2,
-    tree: r() < 0.5 ? 1 : r() < 0.35 ? 2 : 0,
-    hedge: r() < 0.55,
-  };
-  return { h, r };
+  const w = Math.max(7.2, LW - 1.5 - r() * 1.3);
+  const d = 7.6 + r() * 1.4;
+  const rh = roof === "gable" ? 2.5 + r() * 1.1 : roof === "hip" ? 1.8 + r() * 1.3 : 0;
+  const wall = pick(r, WALLS);
+  const roofC = pick(r, ROOFS);
+  const door = pick(r, DOORS);
+  const sr = r();
+  const stage: Stage = sr < 0.3 ? 0 : sr < 0.72 ? 1 : 2;
+  const bodyH = floors * FH;
+  const f = stage === 0 ? 0.18 + r() * 0.22 : stage === 1 ? 0.5 + r() * 0.4 : 1;
+  const wallH = stage === 2 ? bodyH : Math.min(bodyH, Math.max(1.1, bodyH * f));
+  const frameTop = stage === 2 ? bodyH : Math.min(bodyH, (Math.floor(wallH / FH + 1e-6) + 1) * FH);
+  return { x, z, rot: lot.rot, w, d, floors, rh, roof, wall, roofC, door, stage, wallH, frameTop, detail: ring <= 2 };
 };
 
-const houseTop = (h: HouseSpec) => Y0 + 0.4 + h.floors * FH + (h.roof === "flat" ? 0.6 : h.rh + 0.3);
+// Highest point of a house site (roof ridge, or the scaffold's guard rail).
+export const siteTop = (h: HouseSpec) =>
+  Y0 + 0.4 + (h.stage === 2 ? h.floors * FH + (h.roof === "flat" ? 0.9 : h.rh + 0.3) : h.frameTop + 1.0);
 
-const blockBase = (b: Builder, i: number, j: number, top: string) => {
-  const [cx, cz] = blockC(i, j);
+// Evenly spaced positions from -span/2 to span/2, at most `gap` apart.
+const spread = (span: number, gap: number) => {
+  const n = Math.max(1, Math.ceil(span / gap));
+  return Array.from({ length: n + 1 }, (_, k) => -span / 2 + (k * span) / n);
+};
+
+// One house under construction; its front faces local +z. yard = distance from the front wall to the
+// lot's front edge.
+const addSite = (b: Adder, h: HouseSpec, yard: number, lw: number, r: () => number) => {
+  const { x, z, rot: ry, w, d, floors, rh, wallH, frameTop, detail } = h;
+  const P = (lx: number, ly: number, lz: number, sx: number, sy: number, sz: number, col: string, tpl = T.box, extra = 0) => {
+    const [ox, oz] = rot(lx, lz, ry);
+    b.add(tpl, x + ox, Y0 + ly, z + oz, sx, sy, sz, ry + extra, C(col));
+  };
+  const bodyH = floors * FH;
+  const tw = 0.3;
+
+  // Bare earth around the house, then the foundation slab.
+  P(0, 0.04, 0.7, Math.min(w + 3.4, lw - 0.3), 1, d + 4.6, DIRT, T.quadY);
+  P(0, 0.2, 0, w + 0.5, 0.4, d + 0.5, CONCRETE);
+
+  // Walls so far (a hollow shell, so from above you see into the rooms).
+  const wy = 0.4 + wallH / 2;
+  P(0, wy, d / 2 - tw / 2, w, wallH, tw, h.wall);
+  P(0, wy, -d / 2 + tw / 2, w, wallH, tw, h.wall);
+  P(-w / 2 + tw / 2, wy, 0, tw, wallH, d - 2 * tw, h.wall);
+  P(w / 2 - tw / 2, wy, 0, tw, wallH, d - 2 * tw, h.wall);
+
+  // Floor slabs that are already poured.
+  for (let f = 1; f <= floors; f++) {
+    const y = f * FH;
+    if (y > frameTop + 1e-6 || (f === floors && h.stage < 2)) break;
+    P(0, 0.4 + y - 0.1, 0, w - 0.06, 0.2, d - 0.06, SLAB);
+  }
+
+  // Timber frame above the walls, up to the floor being built.
+  if (frameTop > wallH + 0.05) {
+    const ph = frameTop - wallH;
+    const py = 0.4 + wallH + ph / 2;
+    const xs = detail ? spread(w - 0.24, 2.6) : [-(w - 0.24) / 2, (w - 0.24) / 2];
+    const zs = detail ? spread(d - 0.24, 2.8) : [-(d - 0.24) / 2, (d - 0.24) / 2];
+    for (const u of xs) {
+      P(u, py, d / 2 - 0.12, 0.24, ph, 0.24, TIMBER);
+      P(u, py, -d / 2 + 0.12, 0.24, ph, 0.24, TIMBER);
+    }
+    for (const v of zs.slice(1, -1)) {
+      P(-w / 2 + 0.12, py, v, 0.24, ph, 0.24, TIMBER);
+      P(w / 2 - 0.12, py, v, 0.24, ph, 0.24, TIMBER);
+    }
+    const by = 0.4 + frameTop - 0.12;
+    P(0, by, d / 2 - 0.12, w, 0.24, 0.24, TIMBER);
+    P(0, by, -d / 2 + 0.12, w, 0.24, 0.24, TIMBER);
+    P(-w / 2 + 0.12, by, 0, 0.24, 0.24, d, TIMBER);
+    P(w / 2 - 0.12, by, 0, 0.24, 0.24, d, TIMBER);
+  }
+
+  // Window and door openings in the finished part of the walls.
+  const du = w > 9.6 ? -w * 0.2 : -w * 0.16;
+  const nF = Math.max(2, Math.floor((w - 1) / 2.5));
+  const us = (n: number, span: number) => Array.from({ length: n }, (_, k) => (k - (n - 1) / 2) * (span / n));
+  const hole = (face: "F" | "B" | "L" | "R", u: number, ly: number) => {
+    const ext = face === "F" ? 0 : face === "B" ? Math.PI : face === "L" ? -Math.PI / 2 : Math.PI / 2;
+    const off = (face === "F" || face === "B" ? d / 2 : w / 2) + 0.03;
+    const [lx, lz] = rot(u, off, ext);
+    P(lx, ly, lz, 1.15, 1.35, 1, HOLE, T.quadZ, ext);
+  };
+  for (let f = 0; f < floors; f++) {
+    const ly = 0.4 + FH * f + 1.6;
+    if (ly + 0.75 > 0.4 + wallH) break;
+    for (const u of us(nF, w)) {
+      if (!(f === 0 && Math.abs(u - du) < 1.6)) hole("F", u, ly);
+      if (detail) hole("B", u, ly);
+    }
+    hole("L", 0, ly);
+    hole("R", 0, ly);
+  }
+  if (wallH >= 2.4) P(du, 0.4 + 1.12, d / 2 + 0.03, 1.1, 2.2, 1, HOLE, T.quadZ);
+
+  // Roof going on: rafters, a ridge beam, and part of one slope already covered.
+  if (h.stage === 2) {
+    const top = 0.4 + bodyH;
+    if (h.roof === "flat") {
+      P(0, top + 0.3, d / 2 - 0.12, w, 0.6, 0.24, h.wall);
+      P(0, top + 0.3, -d / 2 + 0.12, w, 0.6, 0.24, h.wall);
+      P(-w / 2 + 0.12, top + 0.3, 0, 0.24, 0.6, d, h.wall);
+      P(w / 2 - 0.12, top + 0.3, 0, 0.24, 0.6, d, h.wall);
+      const cw = w * (0.35 + r() * 0.4);
+      P(-w / 2 + cw / 2 + 0.2, 0.4 + bodyH + 0.04, 0, cw, 1, d - 0.5, h.roofC, T.quadY);
+    } else {
+      const half = d / 2;
+      const Ls = Math.hypot(rh, half);
+      const a = Math.atan2(rh, half);
+      const n = Math.max(3, Math.round(w / (detail ? 1.2 : 2.2)));
+      for (let k = 0; k < n; k++) {
+        const u = -w / 2 + 0.15 + (k * (w - 0.3)) / (n - 1);
+        for (const sgn of [1, -1]) {
+          const [ox, oz] = rot(u, (sgn * half) / 2, ry);
+          b.addE(T.box, x + ox, Y0 + top + rh / 2, z + oz, 0.16, 0.22, Ls + 0.3, sgn * a, ry, 0, C(TIMBER));
+        }
+      }
+      P(0, top + rh, 0, w + 0.3, 0.24, 0.24, TIMBER);
+      if (r() < 0.75) {
+        const cw = w * (0.35 + r() * 0.45);
+        const sgn = r() < 0.5 ? 1 : -1;
+        const lift = 0.19; // half a rafter + half a board, along the slope's normal
+        const [ox, oz] = rot(-w / 2 + cw / 2, sgn * (half / 2 + (lift * rh) / Ls), ry);
+        b.addE(T.box, x + ox, Y0 + top + rh / 2 + (lift * half) / Ls, z + oz, cw + 0.3, 0.16, Ls + 0.5, sgn * a, ry, 0, C(h.roofC));
+      }
+    }
+  }
+
+  // Scaffolding across the front (and down one side on the bigger houses near the plaza): a plank
+  // deck at every floor so far, a guard rail a metre above each deck.
+  const sTop = frameTop + 1.0;
+  const sH = 0.4 + sTop; // the tubes stand on the ground beside the slab
+  const decks: number[] = [];
+  for (let y = FH; y <= frameTop + 1e-6; y += FH) decks.push(y);
+  const n1 = d / 2 + 0.45;
+  const n2 = d / 2 + 1.45;
+  for (const u of spread(w + 0.8, 2.4)) {
+    P(u, sH / 2, n1, 0.12, sH, 0.12, TUBE);
+    P(u, sH / 2, n2, 0.12, sH, 0.12, TUBE);
+  }
+  P(0, 1.9, n2, w + 0.9, 0.1, 0.1, TUBE);
+  for (const y of decks) {
+    P(0, 0.4 + y, n2, w + 0.9, 0.1, 0.1, TUBE);
+    P(0, 0.4 + y + 1.0, n2, w + 0.9, 0.1, 0.1, TUBE);
+    if (detail) P(0, 0.4 + y, n1, w + 0.9, 0.1, 0.1, TUBE);
+    P(0, 0.4 + y + 0.09, (n1 + n2) / 2, w + 0.8, 0.08, 1.1, PLANK);
+  }
+  if (detail) {
+    // Always on the house's own right, so neighbours' side scaffolds never face each other.
+    const m1 = w / 2 + 0.38;
+    const m2 = w / 2 + 0.78;
+    for (const v of spread(d, 2.6)) {
+      P(m1, sH / 2, v, 0.1, sH, 0.1, TUBE);
+      P(m2, sH / 2, v, 0.1, sH, 0.1, TUBE);
+    }
+    for (const y of decks) {
+      P(m2, 0.4 + y, 0, 0.1, 0.1, d + 0.2, TUBE);
+      P(m2, 0.4 + y + 1.0, 0, 0.1, 0.1, d + 0.2, TUBE);
+      P((m1 + m2) / 2, 0.4 + y + 0.09, 0, 0.5, 0.08, d, PLANK);
+    }
+    // A diagonal brace on the front.
+    const span = w + 0.8;
+    const len = Math.hypot(span, sH);
+    const [ox, oz] = rot(0, n2 + 0.08, ry);
+    b.addE(T.box, x + ox, Y0 + sH / 2, z + oz, len, 0.08, 0.08, 0, ry, Math.atan2(sH, span), C(TUBE));
+  }
+
+  // The yard: a pallet of bricks, a sand pile, cones at the gate, and an orange site fence.
+  const side = du < 0 ? 1 : -1;
+  const yz = d / 2 + Math.min(3.1, yard - 1.6);
+  if (yard > 2.6) {
+    const bx = side * Math.min(w * 0.28, lw / 2 - 1.4);
+    P(bx, 0.08, yz, 1.3, 0.16, 1.0, "#9A6A43");
+    P(bx, 0.56, yz, 1.2, 0.8, 0.9, BRICK);
+    const sx = side * Math.min(w * 0.28 - 1.9, lw / 2 - 3.2);
+    P(sx, 0.45, yz + 0.3, 1.3, 0.9, 1.2, SAND, T.cone, r() * 6);
+  }
+  const fz = d / 2 + yard - 0.3;
+  for (const g of [-1, 1]) P(du + g * 0.95, 0.3, fz - 0.5, 0.26, 0.6, 0.26, FENCE, T.cone);
+  const fa = -lw / 2 + 0.4;
+  const fb = lw / 2 - 0.4;
+  if (du - 0.8 - fa > 0.5) P((fa + du - 0.8) / 2, 0.55, fz, du - 0.8 - fa, 1.0, 0.06, FENCE);
+  if (fb - du - 0.8 > 0.5) P((du + 0.8 + fb) / 2, 0.55, fz, fb - du - 0.8, 1.0, 0.06, FENCE);
+  if (yard > 1) P(du, 0.04, d / 2 + 0.6 + yard / 2, 1.3, 0.08, yard, "#D6CBB4");
+
+  const tp = (lx: number, lz: number): [number, number] => {
+    const [ox, oz] = rot(lx, lz, ry);
+    return [x + ox, z + oz];
+  };
+  if (r() < 0.45) {
+    const [tx, tz] = tp((r() - 0.5) * w * 0.7, -d / 2 - 3.2);
+    addTree(b, tx, Y0, tz, 0.9 + r() * 0.3, r);
+  }
+};
+
+// ---------- tower crane (its own origin is the foot of the mast) ----------
+
+export const CRANE_JIB = 15;
+export const craneHeight = (floors: number) => 18 + floors * 2;
+
+export const addCraneMast = (b: Adder, height: number) => {
+  b.add(T.box, 0, 0.3, 0, 2.4, 0.6, 2.4, 0, C(CONCRETE));
+  b.add(T.box, 0, height / 2, 0, 1.0, height, 1.0, 0, C(CRANE));
+  for (let y = 2; y < height - 1; y += 2.4) b.add(T.box, 0, y, 0, 1.12, 0.14, 1.12, 0, C("#C99300"));
+};
+
+// The turning top, built at the top of the mast, jib along +x.
+export const addCraneTop = (b: Adder) => {
+  const Y = C(CRANE);
+  b.add(T.box, 0, 0.4, 0, 1.5, 0.8, 1.5, 0, Y);
+  b.add(T.box, 0.2, 0.2, 1.25, 1.4, 1.4, 1.2, 0, Y);
+  b.add(T.box, 0.2, 0.35, 1.87, 1.2, 0.8, 0.05, 0, C("#7FA9C4"));
+  b.add(T.box, 0, 2.8, 0, 0.6, 4.0, 0.6, 0, Y);
+  b.add(T.box, CRANE_JIB / 2 + 0.4, 1.2, 0, CRANE_JIB, 0.8, 0.8, 0, Y);
+  b.add(T.box, -3.6, 1.1, 0, 6.4, 0.5, 0.9, 0, Y);
+  b.add(T.box, -5.8, 0.4, 0, 1.6, 1.6, 1.5, 0, C(CONCRETE));
+  const tie = (x1: number, y1: number, x2: number, y2: number) => {
+    const len = Math.hypot(x2 - x1, y2 - y1);
+    b.addE(T.box, (x1 + x2) / 2, (y1 + y2) / 2, 0, len, 0.1, 0.1, 0, 0, Math.atan2(y2 - y1, x2 - x1), C("#5A5F66"));
+  };
+  tie(0, 4.7, CRANE_JIB * 0.7, 1.6);
+  tie(0, 4.7, -6.4, 1.35);
+};
+
+// The hook gear hangs from a point just under the jib (HOOK_Y in the turning top's coordinates):
+// the trolley sits above that point, the cable is 1 m long downwards (scale it in y for the real
+// length), and the load is built below its own origin (move it to the cable's end).
+export const HOOK_Y = 0.44;
+export const addCraneTrolley = (b: Adder) => {
+  b.add(T.box, 0, 0.18, 0, 1.0, 0.36, 1.0, 0, C("#5A5F66"));
+};
+export const addCraneCable = (b: Adder) => {
+  b.add(T.box, 0, -0.5, 0, 0.06, 1, 0.06, 0, C("#2F3338"));
+};
+export const addCraneLoad = (b: Adder) => {
+  b.add(T.box, 0, -0.3, 0, 0.5, 0.6, 0.4, 0, C("#3A3F45"));
+  b.add(T.box, 0, -0.75, 0, 1.6, 0.14, 1.2, 0, C("#9A6A43"));
+  b.add(T.box, 0, -1.25, 0, 1.4, 0.9, 1.0, 0, C(BRICK));
+};
+export const LOAD_DROP = 1.7; // from the cable's end to the bottom of the load
+
+// Where a lot's crane stands, relative to the house centre (behind the house, on one side).
+export const craneSpot = (h: Pick<HouseSpec, "d" | "rot">, side: number): [number, number] =>
+  rot(side * (LW / 2 - 1.1), -h.d / 2 - 1.9, h.rot);
+
+const addStaticCrane = (b: Adder, h: HouseSpec, r: () => number) => {
+  const [mx, mz] = craneSpot(h, r() < 0.5 ? -1 : 1);
+  const H = craneHeight(h.floors);
+  addCraneMast(placed(b, h.x + mx, Y0, h.z + mz, 1), H);
+  const top = turned(b, h.x + mx, Y0 + H, h.z + mz, r() * Math.PI * 2);
+  addCraneTop(top);
+  const tx = 5 + r() * 8;
+  const cable = 3 + r() * 4;
+  addCraneTrolley(placed(top, tx, HOOK_Y, 0, 1));
+  top.add(T.box, tx, HOOK_Y - cable / 2, 0, 0.06, cable, 0.06, 0, C("#2F3338"));
+  addCraneLoad(placed(top, tx, HOOK_Y - cable, 0, 1));
+};
+
+// ---------- town pieces ----------
+
+const blockBase = (b: Adder, cx: number, cz: number, top: string) => {
   b.add(T.box, cx, 0.15, cz, BX, 0.3, BZ, 0, C(WALK));
   b.add(T.box, cx, 0.36, cz, BX - 3.2, 0.12, BZ - 3.2, 0, C(top));
 };
 
-const parkBlock = (b: Builder, i: number, j: number) => {
-  blockBase(b, i, j, "#8ED061");
-  const [cx, cz] = blockC(i, j);
-  const r = rng(hashStr(`park${i},${j}`));
+const parkBlock = (b: Adder, cx: number, cz: number, seed: string) => {
+  blockBase(b, cx, cz, "#8ED061");
+  const r = rng(hashStr(`park${seed}`));
   const n = 30;
   for (let s = 0; s < n; s++) {
     const a = (s / n) * Math.PI * 2;
@@ -366,7 +514,8 @@ const addFlowerBed = (b: Adder, seed: number) => {
   }
 };
 
-const plazaBlock = (b: Builder) => {
+// The central plaza, built around (0, 0); place it with `placed`.
+const plazaBlock = (b: Adder) => {
   blockBase(b, 0, 0, "#E7DDC8");
   for (let gx = 0; gx < 13; gx++)
     for (let gz = 0; gz < 9; gz++) {
@@ -419,15 +568,22 @@ const plazaBlock = (b: Builder) => {
   ].forEach(([x, z], i) => addFlowerBed(placed(b, x, Y0, z, 1), 31 + i));
 };
 
+// Tall things in the plaza (clock tower, lighthouse), relative to the town centre, so the camera
+// doesn't hide a plot behind them.
+export const LANDMARKS = [
+  { x: -14.8, z: 12.5, r: 7, h: 36 },
+  { x: 14.8, z: -12.5, r: 7, h: 30 },
+];
+
 const PAINT_Y = 0.19; // road paint sits 9 cm above the asphalt so it never z-fights
 
-const roadsAndMarks = (b: Builder, dash: Builder, xw: Builder, xwFar: Builder, rings: number) => {
-  const half = cityHalf(rings);
-  b.add(T.box, 0, 0.05, 0, 2 * half.x, 0.1, 2 * half.z, 0, C(ASPHALT));
+const roadsAndMarks = (b: Builder, dash: Builder, xw: Builder, xwFar: Builder, ox: number, oz: number) => {
+  const rings = TOWN_RINGS;
+  b.add(T.box, ox, 0.05, oz, 2 * TOWN_HALF.x, 0.1, 2 * TOWN_HALF.z, 0, C(ASPHALT));
   const xs: number[] = [];
   const zs: number[] = [];
-  for (let i = -rings - 1; i <= rings; i++) xs.push((i + 0.5) * PX);
-  for (let j = -rings - 1; j <= rings; j++) zs.push((j + 0.5) * PZ);
+  for (let i = -rings - 1; i <= rings; i++) xs.push(ox + (i + 0.5) * PX);
+  for (let j = -rings - 1; j <= rings; j++) zs.push(oz + (j + 0.5) * PZ);
   const paint = C("#F2F0E6");
   for (const xr of xs)
     for (let s = 0; s + 1 < zs.length; s++)
@@ -441,15 +597,12 @@ const roadsAndMarks = (b: Builder, dash: Builder, xw: Builder, xwFar: Builder, r
   const pad = C("#9EA2A8");
   for (const xr of xs)
     for (const zr of zs) {
-      const near = Math.max(Math.abs(xr / PX), Math.abs(zr / PZ)) <= 7;
-      if (near) {
-        for (let s = 0; s < 6; s++) {
-          const o = (s - 2.5) * 1.75;
-          xw.add(T.quadY, xr + o, PAINT_Y, zr - ROAD / 2 - 1.9, 0.9, 1, 2.8, 0, white);
-          xw.add(T.quadY, xr + o, PAINT_Y, zr + ROAD / 2 + 1.9, 0.9, 1, 2.8, 0, white);
-          xw.add(T.quadY, xr - ROAD / 2 - 1.9, PAINT_Y, zr + o, 2.8, 1, 0.9, 0, white);
-          xw.add(T.quadY, xr + ROAD / 2 + 1.9, PAINT_Y, zr + o, 2.8, 1, 0.9, 0, white);
-        }
+      for (let s = 0; s < 6; s++) {
+        const o = (s - 2.5) * 1.75;
+        xw.add(T.quadY, xr + o, PAINT_Y, zr - ROAD / 2 - 1.9, 0.9, 1, 2.8, 0, white);
+        xw.add(T.quadY, xr + o, PAINT_Y, zr + ROAD / 2 + 1.9, 0.9, 1, 2.8, 0, white);
+        xw.add(T.quadY, xr - ROAD / 2 - 1.9, PAINT_Y, zr + o, 2.8, 1, 0.9, 0, white);
+        xw.add(T.quadY, xr + ROAD / 2 + 1.9, PAINT_Y, zr + o, 2.8, 1, 0.9, 0, white);
       }
       // From high up, thin stripes shimmer; each crossing becomes one soft pad instead.
       xwFar.add(T.quadY, xr, PAINT_Y, zr - ROAD / 2 - 1.9, 10.4, 1, 2.8, 0, pad);
@@ -459,34 +612,12 @@ const roadsAndMarks = (b: Builder, dash: Builder, xw: Builder, xwFar: Builder, r
     }
 };
 
-const countryside = (b: Builder, rings: number) => {
-  const half = cityHalf(rings);
-  const ext = Math.max(2400, half.x + 1600, half.z + 1600);
-  const seaZ = -(half.z + 190);
-  const r = rng(4242);
-  b.add(T.box, 0, -0.25, 0, ext * 5, 0.3, ext * 5, 0, C(GRASS));
-  const FIELDS = ["#B5DB7E", "#A4D16E", "#E2CF7F", "#D7BE8E", "#C3DF8A", "#9DCB63", "#E8D88F"];
-  for (let gx = -ext; gx < ext; gx += 92)
-    for (let gz = seaZ + 45; gz < ext; gz += 76) {
-      const cx = gx + (r() - 0.5) * 8;
-      const cz = gz + (r() - 0.5) * 8;
-      if (Math.abs(cx) < half.x + 60 && Math.abs(cz) < half.z + 55) continue;
-      b.add(T.box, cx, 0.06, cz, 84 + r() * 4, 0.12, 68 + r() * 4, 0, C(pick(r, FIELDS)));
-      if (r() < 0.32) for (let t = 0; t < 6; t++) addTree(b, cx - 40 + t * 16 + r() * 4, 0.1, cz + 36.5, 1.1 + r() * 0.4, r);
-      if (r() < 0.1)
-        for (let t = 0; t < 12; t++) addPine(b, cx + (r() - 0.5) * 70, 0.1, cz + (r() - 0.5) * 56, 1.4 + r() * 0.8, r);
-    }
-  b.add(T.box, 0, 0.06, seaZ - 16, ext * 5, 0.12, 32, 0, C("#EADBAA"));
-  b.add(T.box, 0, 0.08, seaZ - 32 - ext * 1.25, ext * 5, 0.12, ext * 2.5, 0, C("#3D95CB"));
-};
-
 // Empty plot: white boundary lines, corner pegs near the centre, the odd tree.
 const emptyLot = (b: Builder, lot: Lot, clear: boolean) => {
-  const [, cz] = blockC(lot.i, lot.j);
   const LINE = C("#F1ECDC");
   const PEG = C("#F08A3C");
-  const z0 = lot.row === "S" ? cz + 0.5 : cz - BZ / 2 + 1.9;
-  const z1 = lot.row === "S" ? cz + BZ / 2 - 1.9 : cz - 0.5;
+  const z0 = lot.row === "S" ? lot.cz + 0.5 : lot.cz - BZ / 2 + 1.9;
+  const z1 = lot.row === "S" ? lot.cz + BZ / 2 - 1.9 : lot.cz - 0.5;
   const x0 = lot.x - LW / 2 + 0.35;
   const x1 = lot.x + LW / 2 - 0.35;
   const y = 0.47;
@@ -506,7 +637,7 @@ const emptyLot = (b: Builder, lot: Lot, clear: boolean) => {
       b.add(T.box, px, Y0 + 0.74, pz, 0.18, 0.12, 0.18, 0, PEG);
     }
   if (clear) return;
-  const r = rng(hashStr(`empty:${lotKey(lot)}`));
+  const r = rng(hashStr(`empty:${lot.plot}`));
   if (r() < 0.16) addTree(b, lot.x + (r() - 0.5) * LW * 0.6, Y0, (z0 + z1) / 2 + (r() - 0.5) * 6, 0.9 + r() * 0.35, r);
   else if (r() < 0.08) addBush(b, lot.x + (r() - 0.5) * LW * 0.6, Y0, (z0 + z1) / 2, 0.9, r);
 };
@@ -520,91 +651,92 @@ export type HouseHit = {
   top: number;
 };
 
-export type LandBuild = {
+export type OwnBuild = {
+  site: THREE.BufferGeometry; // the house being built, around its own origin
+  n: number;
+  lot: Lot;
+  spec: HouseSpec;
+  top: number;
+};
+
+export type TownBuild = {
+  town: number;
   city: THREE.BufferGeometry;
   dash: THREE.BufferGeometry;
   xw: THREE.BufferGeometry;
   xwFar: THREE.BufferGeometry;
-  own: { geo: THREE.BufferGeometry; n: number; lot: Lot; top: number } | null;
+  own: OwnBuild | null;
   houses: HouseHit[];
-  next: { n: number; lot: Lot };
-  rings: number;
-  half: { x: number; z: number };
 };
 
-export const buildLand = (names: readonly string[], mine: number | null): LandBuild => {
-  const rings = ringsToDraw(names.length);
+// plots: house number -> Instagram username, for this town. mine / next are house numbers.
+export const buildTown = (town: number, plots: ReadonlyMap<number, string>, mine: number | null, next: number): TownBuild => {
+  const [ox, oz] = townCenter(town);
   const b = new Builder();
   const dash = new Builder();
   const xw = new Builder();
   const xwFar = new Builder();
-  countryside(b, rings);
-  roadsAndMarks(b, dash, xw, xwFar, rings);
-
-  const taken = new Map<string, number>();
-  for (let n = 1; n <= names.length; n++) taken.set(lotKey(lotForPlot(n)), n);
-  const nextN = names.length + 1;
-  const nextLot = lotForPlot(nextN);
-  const nextKey = lotKey(nextLot);
+  roadsAndMarks(b, dash, xw, xwFar, ox, oz);
 
   const houses: HouseHit[] = [];
-  let own: LandBuild["own"] = null;
+  let own: OwnBuild | null = null;
+  const R = TOWN_RINGS;
 
-  for (let i = -rings; i <= rings; i++)
-    for (let j = -rings; j <= rings; j++) {
+  for (let i = -R; i <= R; i++)
+    for (let j = -R; j <= R; j++) {
+      const cx = ox + i * PX;
+      const cz = oz + j * PZ;
       if (isPlaza(i, j)) {
-        plazaBlock(b);
+        plazaBlock(placed(b, ox, 0, oz, 1));
         continue;
       }
       if (isPark(i, j)) {
-        parkBlock(b, i, j);
+        parkBlock(b, cx, cz, `${town}:${i},${j}`);
         continue;
       }
-      blockBase(b, i, j, LAWN);
+      blockBase(b, cx, cz, LAWN);
       for (const row of ["S", "N"] as Row[])
         for (let k = 0; k < PER_ROW; k++) {
-          const lot = lotAt(i, j, row, k);
-          const n = taken.get(lotKey(lot));
-          if (n === undefined) {
-            emptyLot(b, lot, lotKey(lot) === nextKey);
+          const lot = lotAt(town, i, j, row, k);
+          const name = plots.get(lot.plot);
+          if (name === undefined) {
+            emptyLot(b, lot, lot.plot === next);
             continue;
           }
-          const name = names[n - 1];
-          if (n === mine) {
-            // Your house is its own mesh (built around its own origin) so it can rise out of the ground.
+          if (lot.plot === mine) {
+            // Your house is its own mesh (built around its own origin) so it can be built up in front of you.
             const ob = new Builder();
-            const { h, r } = houseSpec(name, lot, 0, 0);
-            addHouse(ob, h, YARD(h.d), LW, r);
-            own = { geo: ob.geometry(), n, lot, top: houseTop(h) };
-            houses.push(hitBox(n, name, lot, h));
+            const spec = houseSpec(lot.plot, lot, 0, 0);
+            addSite(ob, spec, YARD(spec.d), LW, rng(hashStr(`site:${lot.plot}`)));
+            own = { site: ob.geometry(), n: lot.plot, lot, spec, top: siteTop(spec) };
+            houses.push(hitBox(lot.plot, name, lot, spec));
             continue;
           }
-          const { h, r } = houseSpec(name, lot, lot.x, lot.z);
-          addHouse(b, h, YARD(h.d), LW, r);
-          houses.push(hitBox(n, name, lot, h));
+          const spec = houseSpec(lot.plot, lot, lot.x, lot.z);
+          const r = rng(hashStr(`site:${lot.plot}`));
+          addSite(b, spec, YARD(spec.d), LW, r);
+          if (spec.stage === 1 && lot.ring >= 2 && r() < 0.05) addStaticCrane(b, spec, r);
+          houses.push(hitBox(lot.plot, name, lot, spec));
         }
-      const [cx, cz] = blockC(i, j);
       if (ringOf(i, j) <= 4)
         for (const sx of [-1, 1]) for (const sz of [-1, 1]) addLamp(b, cx + sx * (BX / 2 - 0.8), 0.3, cz + sz * (BZ / 2 - 0.8));
     }
 
   return {
+    town,
     city: b.geometry(),
     dash: dash.geometry(),
     xw: xw.geometry(),
     xwFar: xwFar.geometry(),
     own,
     houses,
-    next: { n: nextN, lot: nextLot },
-    rings,
-    half: cityHalf(rings),
   };
 };
 
 const hitBox = (n: number, name: string, lot: Lot, h: HouseSpec): HouseHit => {
-  const top = houseTop(h);
-  const hw = h.w / 2 + 0.5;
-  const hd = h.d / 2 + 0.5;
+  const top = siteTop(h);
+  const hw = h.w / 2 + 1.6;
+  const hd = h.d / 2 + 1.6;
   return {
     n,
     name,
@@ -613,4 +745,10 @@ const hitBox = (n: number, name: string, lot: Lot, h: HouseSpec): HouseHit => {
     max: new THREE.Vector3(lot.x + hw, top, lot.z + hd),
     top,
   };
+};
+
+// Spec of any house, for the far-away towns and for the pin over a house in another town.
+export const specForPlot = (plot: number) => {
+  const lot = lotForPlot(plot);
+  return { lot, spec: houseSpec(plot, lot, lot.x, lot.z) };
 };

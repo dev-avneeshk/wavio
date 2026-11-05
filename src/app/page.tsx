@@ -5,10 +5,10 @@ import {
   SetupNotice,
   Shell,
   SignInPanel,
-  type Entry,
 } from "@/components/waitlist-ui";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
+import { emptyWorld, nextPlot, parseWorldView } from "@/lib/world";
 
 type HomeProps = {
   searchParams: Promise<{ error?: string | string[] }>;
@@ -19,63 +19,51 @@ export default async function Home({ searchParams }: HomeProps) {
 
   if (!hasSupabaseEnv) {
     return (
-      <Shell step={0} signedIn={false} names={[]} mine={null} mineName={null}>
+      <Shell step={0} signedIn={false} view={emptyWorld}>
         <SetupNotice />
       </Shell>
     );
   }
 
+  // One call gets the world's numbers, the houses of the town to show first (yours, or the one
+  // where the next house goes), and your own house if you have one.
   const supabase = await createClient();
-  const [{ data: auth }, houses] = await Promise.all([supabase.auth.getClaims(), supabase.rpc("waitlist_houses")]);
-
-  // Every claimed Instagram username in join order: names[0] lives on plot #1.
-  if (houses.error) console.error("[waitlist] houses failed:", houses.error.code, houses.error.message);
-  const names: string[] = Array.isArray(houses.data)
-    ? houses.data.filter((n: unknown): n is string => typeof n === "string")
-    : [];
-  const nextPlot = names.length + 1;
+  const [{ data: auth }, world] = await Promise.all([supabase.auth.getClaims(), supabase.rpc("waitlist_world")]);
+  if (world.error) console.error("[waitlist] world failed:", world.error.code, world.error.message);
+  const view = world.error ? null : parseWorldView(world.data);
+  if (!world.error && !view) console.error("[waitlist] world returned an unexpected shape");
 
   const claims = auth?.claims ?? null;
   if (!claims) {
+    const shown = view ?? emptyWorld;
     return (
-      <Shell step={0} signedIn={false} names={names} mine={null} mineName={null}>
-        <SignInPanel authFailed={errorParam === "auth"} nextPlot={nextPlot} />
+      <Shell step={0} signedIn={false} view={shown}>
+        <SignInPanel authFailed={errorParam === "auth"} nextPlot={nextPlot(shown)} />
       </Shell>
     );
   }
 
   const email = typeof claims.email === "string" ? claims.email : null;
 
-  // RLS only returns the signed-in user's own row; the filter just makes that explicit.
-  const { data: entry, error } = await supabase
-    .from("waitlist")
-    .select("instagram_username, created_at")
-    .eq("user_id", claims.sub)
-    .maybeSingle<Entry>();
-
-  if (error) {
-    console.error("[waitlist] load failed:", error.code, error.message);
+  if (!view) {
     return (
-      <Shell step={1} signedIn names={names} mine={null} mineName={null}>
+      <Shell step={1} signedIn view={emptyWorld}>
         <LoadErrorPanel />
       </Shell>
     );
   }
 
-  if (!entry) {
+  if (!view.me) {
     return (
-      <Shell step={1} signedIn names={names} mine={null} mineName={null}>
-        <JoinPanel email={email} nextPlot={nextPlot} />
+      <Shell step={1} signedIn view={view}>
+        <JoinPanel email={email} nextPlot={nextPlot(view)} />
       </Shell>
     );
   }
 
-  const index = names.indexOf(entry.instagram_username);
-  const position = index >= 0 ? index + 1 : null;
-
   return (
-    <Shell step={2} signedIn names={names} mine={position} mineName={entry.instagram_username}>
-      <OnListPanel entry={entry} position={position} email={email} />
+    <Shell step={2} signedIn view={view}>
+      <OnListPanel me={view.me} email={email} />
     </Shell>
   );
 }

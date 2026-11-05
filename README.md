@@ -1,11 +1,14 @@
 # House Waitlist
 
-A one-page waitlist on top of a 3D empty city (the "Lazy Films City" land from the free-house reel). Visitors sign in with Google, type their Instagram username, and a house goes up on the next empty plot with their `@username` on it. Entries are stored in Supabase.
+A one-page waitlist on top of a 3D world of towns (the "Lazy Films City" land from the free-house reel). Visitors sign in with Google and type their Instagram username. They're on the waitlist, and their house starts being built on the next empty plot, with their `@username` on it. Entries are stored in Supabase.
 
-- **Stack:** Next.js 16 (App Router), Supabase Auth (Google) + Postgres, Tailwind CSS 4, three.js for the city.
-- **Stored per person:** Google email, Google name, Instagram username (lowercase, no `@`), join time.
-- **Public:** the Instagram usernames, shown on the houses in join order (plot #1 is the first person). Google names and emails are never sent to the browser for anyone but the signed-in person.
-- **The city:** plot #1 is on Founders' Row facing the central plaza, and the city fills outward ring by ring. Plot numbers never change. Each house's colours and shape come from the username, so the same person always gets the same house.
+- **Stack:** Next.js 16 (App Router), Supabase Auth (Google) + Postgres, Tailwind CSS 4, three.js for the map.
+- **Stored per person:** Google email, Google name, Instagram username (lowercase, no `@`), house number, join time.
+- **Public:** the Instagram usernames and their house numbers, shown on the houses. Google names and emails are never sent to the browser for anyone but the signed-in person.
+- **The world:** every town has 1,000 plots. Town 1 is the first town (the city from the reel). When it's full, Town 2 opens next to it, then Town 3, and so on with no limit, so 100,000 people get 100 towns. House numbers run on across towns: houses 1-1,000 are Town 1, 1,001-2,000 are Town 2. Towns sit along the coast and spread inland in rings around Town 1.
+- **A town:** house #1 is on Founders' Row facing the central plaza, and the town fills outward ring by ring. House numbers are given out by the database and never change (deleting someone leaves their plot empty; nobody moves).
+- **Being built:** every house on the waitlist shows as a building site (foundations, walls, timber frame, scaffolding, roof going on). How far along it is and its colours come from the house number, so a house always looks the same. Your own house builds up from the ground when you open the page and has a crane working on it.
+- **The map:** the town you're looking at is drawn in full detail; all other towns are drawn simply. Zoom out (or press **World**) to see every town with its label, and tap a town to fly there.
 - **Rules:** one entry per Google account, one entry per Instagram username. Only a valid Instagram username is accepted (1-30 characters; letters, numbers, `.` and `_`; no link, no spaces, no email, no leading/trailing or double period). The form checks it, the server checks it again, and the database refuses anything else.
 - **Wording:** all page text is in `src/lib/site.ts`.
 
@@ -79,21 +82,21 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000, click **Continue with Google**, pick an account, enter an Instagram username, and click **Join the waitlist**. Then check Supabase **Table Editor -> waitlist**: your row is there.
+Open http://localhost:3000, click **Continue with Google**, pick an account, enter an Instagram username, and click **Claim house #1**. Then check Supabase **Table Editor -> waitlist**: your row is there with `plot` 1.
 
 ---
 
 ## Seeing and exporting the list
 
-- **Table Editor -> waitlist** shows everyone, in join order (`id`).
+- **Table Editor -> waitlist** shows everyone. The `plot` column is their house number.
 - To download it: Table Editor -> `waitlist` -> **Export -> Export as CSV**.
-- To remove or fix an entry (e.g. someone typo'd their username), edit or delete the row in Table Editor. Visitors can't edit or delete entries from the website.
+- To remove or fix an entry (e.g. someone typo'd their username), edit or delete the row in Table Editor. Visitors can't edit or delete entries from the website. Don't change `plot` numbers by hand: two people can't share one, and the map uses them.
 - Handy query for the SQL Editor:
 
   ```sql
-  select row_number() over (order by id) as plot, instagram_username, full_name, email, created_at
+  select plot as house, (plot - 1) / 1000 + 1 as town, instagram_username, full_name, email, created_at
   from public.waitlist
-  order by id;
+  order by plot;
   ```
 
 ## Putting it online (Vercel)
@@ -116,23 +119,25 @@ Open http://localhost:3000, click **Continue with Google**, pick an account, ent
 | After Google you land back on the page with "Google sign-in didn't finish" | Add your site's URL with `/**` to Supabase Redirect URLs (step 4d). |
 | After Google you end up on `localhost` when using the live site | Set the Supabase **Site URL** to your live URL and add the live URL to Redirect URLs. |
 | "Couldn't save your spot" or "Couldn't load your house" | The table is probably missing. Run `supabase/schema.sql` again. The exact error is in the terminal running `npm run dev`. |
-| The city shows no houses even though people joined | Run the latest `supabase/schema.sql` again (it adds the `waitlist_houses` function the map reads). |
+| The map shows no houses even though people joined | Run the latest `supabase/schema.sql` again (it adds the `plot` column and the `waitlist_world` function the map reads). |
 | The map says it needs WebGL | That browser has 3D graphics turned off. Joining still works. |
 
 ## Project layout
 
 ```
-supabase/schema.sql             table, security rules, public list of houses
-src/app/page.tsx                loads the houses + the visitor's state and picks what to show
+supabase/schema.sql             table, security rules, house numbers, the map's data function
+src/app/page.tsx                loads the world + the visitor's state and picks what to show
 src/app/actions.ts              join the waitlist / sign out (server side)
 src/app/auth/callback/route.ts  finishes Google sign-in
 src/proxy.ts                    keeps the login session fresh
 src/lib/instagram.ts            Instagram username rules
-src/lib/site.ts                 all page wording
+src/lib/world.ts                town size (1,000) and house number -> town maths
+src/lib/site.ts                 all page wording (and town names)
 src/components/waitlist-ui.tsx  the card (steps, sign-in, Instagram form, your house)
-src/components/land/layout.ts   city grid and plot numbering
-src/components/land/build.ts    builds the city, plots and houses
-src/components/land/engine.ts   3D scene, camera, pin, PLOT sign, name tags
+src/components/land/layout.ts   where towns sit in the world, the town grid, plot numbering
+src/components/land/build.ts    builds one town in detail: plaza, parks, plots, building sites, cranes
+src/components/land/country.ts  countryside, sea, highways, and every other town in simple form
+src/components/land/engine.ts   3D scene, camera, pin, signs, name tags, town labels, switching towns
 ```
 
 The previous portfolio is saved in git under the tag `portfolio-backup-2026-11-05` (`git checkout portfolio-backup-2026-11-05` to look at it).

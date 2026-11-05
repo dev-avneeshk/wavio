@@ -1,14 +1,37 @@
-// The 3D land: renderer, camera moves, the yellow pin + PLOT sign, name tags and house picking.
+// The 3D world: renderer, camera moves, the yellow pin + PLOT sign, name tags, house picking, and
+// switching which town is drawn in full detail as you move around.
 // Plain three.js driven by its own animation loop; React only mounts it and passes data in.
 import * as THREE from "three";
 import { MapControls } from "three/examples/jsm/controls/MapControls.js";
 import { getPreviewName } from "@/lib/preview-name";
-import { buildLand, type HouseHit, type LandBuild } from "./build";
-import { rot } from "./geo";
-import { Y0, type Lot } from "./layout";
+import { site } from "@/lib/site";
+import { TOWN_SIZE, housesInTown, townOf, type MyHouse, type WorldView } from "@/lib/world";
+import {
+  HOOK_Y,
+  LANDMARKS,
+  LOAD_DROP,
+  addCraneCable,
+  addCraneLoad,
+  addCraneMast,
+  addCraneTop,
+  addCraneTrolley,
+  buildTown,
+  craneHeight,
+  craneSpot,
+  placed,
+  siteTop,
+  specForPlot,
+  type HouseHit,
+  type OwnBuild,
+  type TownBuild,
+} from "./build";
+import { SHAPES, buildCountry, buildFarTowns, extentOf, type Extent, type Inst, type Trees } from "./country";
+import { Builder, rot } from "./geo";
+import { SEA_Z, TOWN_HALF, Y0, lastTownOfRing, lotForPlot, townAtPoint, townCenter, townRing, type Lot } from "./layout";
 
 const FONT = 'ui-rounded, "SF Pro Rounded", -apple-system, "Helvetica Neue", Arial, sans-serif';
 const SKY_FOG = "#DDE8EE";
+const SKY_R = 7000;
 const SUN = new THREE.Vector3(-0.45, 1, 0.6).normalize();
 // Light-space basis of the sun's shadow camera, used to snap its centre to whole shadow texels.
 const L_ROT = new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), SUN.clone().negate(), new THREE.Vector3(0, 1, 0));
@@ -16,15 +39,16 @@ const L_INV = L_ROT.clone().invert();
 const PIN_SCALE = 1.15;
 const PIN_HEIGHT = (7.4 + 2.2) * PIN_SCALE;
 const SIGN = { w: 4.4, h: 2.7 };
-// Tall things in the plaza (clock tower, lighthouse) the camera must not hide a plot behind.
-const LANDMARKS = [
-  { x: -14.8, z: 12.5, r: 7, h: 36 },
-  { x: 14.8, z: -12.5, r: 7, h: 30 },
-];
+const REVEAL_MS = 2600;
+// Past this camera distance you're looking at the world, not a street: town labels show up.
+const LABEL_D = 950;
+// Closer than this, the town under the camera gets drawn in full detail.
+const DETAIL_D = 1700;
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
-const backOut = (t: number) => 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
+const easeOut = (t: number) => 1 - (1 - t) ** 3;
+const fmt = (n: number) => n.toLocaleString("en");
 
 const canvasTex = (w: number, h: number, draw: (g: CanvasRenderingContext2D) => void) => {
   const cv = document.createElement("canvas");
@@ -69,27 +93,45 @@ const skyTex = () =>
     }
   });
 
-const signTex = (n: number) =>
+// A white board with a red frame and up to four lines of text (sizes in canvas pixels).
+const boardTex = (lines: [string, number][], band = false) =>
   canvasTex(880, 540, (g) => {
     g.fillStyle = "#FFFFFF";
     g.fillRect(0, 0, 880, 540);
+    let top = 0;
+    if (band) {
+      // Yellow and black hazard stripes across the top: a building site.
+      g.save();
+      g.beginPath();
+      g.rect(0, 0, 880, 92);
+      g.clip();
+      g.fillStyle = "#F2B705";
+      g.fillRect(0, 0, 880, 92);
+      g.fillStyle = "#2A2A2A";
+      for (let x = -120; x < 900; x += 92) {
+        g.beginPath();
+        g.moveTo(x, 92);
+        g.lineTo(x + 46, 92);
+        g.lineTo(x + 138, 0);
+        g.lineTo(x + 92, 0);
+        g.closePath();
+        g.fill();
+      }
+      g.restore();
+      top = 92;
+    }
     g.strokeStyle = "#C24038";
     g.lineWidth = 22;
-    g.strokeRect(19, 19, 842, 502);
+    g.strokeRect(11, 11, 858, 518);
     g.fillStyle = "#2A2A2A";
     g.textAlign = "center";
     g.textBaseline = "middle";
-    const lines: [string, number][] = [
-      [`PLOT #${n}`, 170],
-      ["AVAILABLE", 96],
-      ["LAZY FILMS CITY", 70],
-    ];
-    const total = lines.reduce((a, [, sz]) => a + sz * 1.08, 0);
-    let y = (540 - total) / 2;
+    const total = lines.reduce((a, [, sz]) => a + sz * 1.1, 0);
+    let y = top + (540 - top - total) / 2;
     for (const [txt, sz] of lines) {
       g.font = `900 ${sz}px ${FONT}`;
-      g.fillText(txt, 440, y + (sz * 1.08) / 2, 790);
-      y += sz * 1.08;
+      g.fillText(txt, 440, y + (sz * 1.1) / 2, 790);
+      y += sz * 1.1;
     }
   });
 
@@ -103,17 +145,32 @@ const glowTex = () =>
     g.fillRect(0, 0, 256, 256);
   });
 
+type Tag = { el: HTMLDivElement; title: HTMLSpanElement; sub: HTMLSpanElement };
+
 // HTML tag that follows a point in the 3D scene (same look as the tags in the reel).
-const makeTag = (bg: string, color: string) => {
+const makeTag = (bg: string, color: string): Tag => {
   const el = document.createElement("div");
   el.style.cssText =
     "position:absolute;left:0;top:0;pointer-events:none;will-change:transform;opacity:0;transition:opacity .2s ease;";
   const pill = document.createElement("div");
-  pill.style.cssText = `background:${bg};color:${color};border-radius:999px;padding:7px 14px;font:800 15px/1.1 ${FONT};white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.22);max-width:72vw;overflow:hidden;text-overflow:ellipsis;`;
+  pill.style.cssText = `background:${bg};color:${color};border-radius:16px;padding:7px 14px;font:800 15px/1.1 ${FONT};white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.22);max-width:72vw;overflow:hidden;text-overflow:ellipsis;text-align:center;`;
+  const title = document.createElement("span");
+  title.style.cssText = "display:block;overflow:hidden;text-overflow:ellipsis;";
+  const sub = document.createElement("span");
+  sub.style.cssText = "display:none;margin-top:3px;font:700 11px/1.1 " + FONT + ";opacity:.72;letter-spacing:.02em;";
+  pill.append(title, sub);
   const arrow = document.createElement("div");
   arrow.style.cssText = `width:12px;height:12px;background:${bg};transform:rotate(45deg);margin:-7px auto 0;border-radius:2px;`;
   el.append(pill, arrow);
-  return { el, pill };
+  return { el, title, sub };
+};
+
+const setTagText = (tag: Tag, title: string, sub = "") => {
+  if (tag.title.textContent !== title) tag.title.textContent = title;
+  if (tag.sub.textContent !== sub) {
+    tag.sub.textContent = sub;
+    tag.sub.style.display = sub ? "block" : "none";
+  }
 };
 
 type View = { target: THREE.Vector3; radius: number; phi: number; theta: number };
@@ -127,10 +184,21 @@ type Flight = {
   bump: number;
 };
 
+export type ViewInfo = {
+  town: number; // the town under the camera
+  houses: number; // houses in it
+  open: number; // the town where the next house goes
+  towns: number; // towns drawn on the map
+  zoomedOut: boolean; // looking at the world rather than one town
+  loading: boolean;
+};
+
 export type LandEngineOptions = {
   // Pixels on the left edge covered by the page's card (desktop), so focused things are centred in the free space.
   leftInset: () => number;
-  onHouseCount?: (count: number) => void;
+  // Fetches one town's houses (and fresh world numbers).
+  loadTown: (town: number) => Promise<WorldView | null>;
+  onView?: (info: ViewInfo) => void;
 };
 
 export class LandEngine {
@@ -138,33 +206,65 @@ export class LandEngine {
   private opts: LandEngineOptions;
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(45, 1, 0.5, 14000);
+  private camera = new THREE.PerspectiveCamera(45, 1, 0.5, 16000);
   private controls: MapControls;
   private sun = new THREE.DirectionalLight("#FFF4E0", 2.1);
   private fog = new THREE.Fog(SKY_FOG, 100, 3000);
   private sky: THREE.Mesh;
   private lam = new THREE.MeshLambertMaterial({ vertexColors: true });
+  private inst = new THREE.MeshLambertMaterial({ color: "#FFFFFF" });
+  private revealPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e5);
+  private ownMat = new THREE.MeshLambertMaterial({ vertexColors: true, clippingPlanes: [this.revealPlane], clipShadows: true });
   private pinMat = new THREE.MeshLambertMaterial({ color: "#F7C631", emissive: "#8A6400", emissiveIntensity: 0.7 });
   private glowMat: THREE.MeshBasicMaterial;
   private signMat = new THREE.MeshLambertMaterial();
+  private ownSignMat = new THREE.MeshLambertMaterial();
+
+  // The town drawn in detail.
   private city = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
   private dash = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
   private xw = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
   private xwFar = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
-  private own = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
+  // Your house: the site (built up from the ground), its crane and its sign.
+  private own = new THREE.Group();
+  private ownSite = new THREE.Mesh(new THREE.BufferGeometry(), this.ownMat);
+  private mast = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
+  private craneTop = new THREE.Group();
+  private craneArm = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
+  private hook = new THREE.Group();
+  private trolley = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
+  private cable = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
+  private load = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
+  private ownSign = new THREE.Group();
+  private crane: { H: number; base: number; reach: number; top: number } | null = null;
+  // Countryside and the other towns.
+  private country = new THREE.Group();
+  private far = new THREE.Group();
+
   private pin = new THREE.Group();
   private glow: THREE.Mesh;
   private sign = new THREE.Group();
   private labels: HTMLDivElement;
   private focusTag = makeTag("#F7C631", "#2C2F34");
   private hoverTag = makeTag("#FFFFFF", "#2C2F34");
-  private data: LandBuild | null = null;
+  private townTags: { t: number; tag: Tag }[] = [];
+
+  private view: WorldView | null = null;
+  private me: MyHouse | null = null;
+  private towns = new Map<number, Map<number, string>>(); // town -> house number -> username
+  private failed = new Map<number, number>(); // town -> when loading it last failed
+  private active = 0;
+  private loading = 0;
+  private maxTown = 0;
+  private ext: Extent = extentOf(1);
+  private underTown = 0;
+  private underSince = 0;
+  private lastInfo = "";
+  private built: TownBuild | null = null;
   private boxes: { hit: HouseHit; box: THREE.Box3 }[] = [];
-  private mine: number | null = null;
-  private mineName: string | null = null;
   private focus: { lot: Lot; n: number; baseY: number; own: boolean } | null = null;
   private flight: Flight | null = null;
-  private growStart = -1;
+  private revealStart = -1;
   private hovered: HouseHit | null = null;
   private selected: HouseHit | null = null;
   private down: { x: number; y: number; t: number } | null = null;
@@ -179,6 +279,7 @@ export class LandEngine {
   private height = 1;
   private tmp = new THREE.Vector3();
   private ray = new THREE.Raycaster();
+  private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
   constructor(host: HTMLElement, opts: LandEngineOptions) {
     this.host = host;
@@ -192,9 +293,10 @@ export class LandEngine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, coarse ? 1.75 : 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.localClippingEnabled = true;
     const canvas = this.renderer.domElement;
     canvas.style.cssText = "display:block;width:100%;height:100%;outline:none;";
-    canvas.setAttribute("aria-label", "3D map of Lazy Films City. Drag to move around, scroll or pinch to zoom.");
+    canvas.setAttribute("aria-label", "3D map of the towns. Drag to move around, scroll or pinch to zoom.");
     canvas.setAttribute("role", "img");
     host.appendChild(canvas);
 
@@ -213,22 +315,25 @@ export class LandEngine {
     this.sun.shadow.bias = -0.0005;
     this.scene.add(this.sun, this.sun.target);
     this.sky = new THREE.Mesh(
-      new THREE.SphereGeometry(7000, 32, 16),
+      new THREE.SphereGeometry(SKY_R, 32, 16),
       new THREE.MeshBasicMaterial({ map: skyTex(), side: THREE.BackSide, fog: false, depthWrite: false }),
     );
     this.sky.renderOrder = -1;
     this.scene.add(this.sky);
 
-    // City meshes
-    for (const m of [this.city, this.own]) {
+    // Town meshes
+    for (const m of [this.city, this.ownSite, this.mast, this.craneArm, this.trolley, this.cable, this.load]) {
       m.castShadow = true;
       m.receiveShadow = true;
     }
     this.dash.receiveShadow = true;
     this.xw.receiveShadow = true;
     this.xwFar.receiveShadow = true;
+    this.hook.add(this.trolley, this.cable, this.load);
+    this.craneTop.add(this.craneArm, this.hook);
+    this.own.add(this.ownSite, this.mast, this.craneTop);
     this.own.visible = false;
-    this.scene.add(this.city, this.dash, this.xw, this.xwFar, this.own);
+    this.scene.add(this.country, this.far, this.city, this.dash, this.xw, this.xwFar, this.own);
 
     // Yellow pin + ground glow
     const ball = new THREE.Mesh(new THREE.SphereGeometry(2.2, 32, 20), this.pinMat);
@@ -253,22 +358,11 @@ export class LandEngine {
     this.glow.rotation.x = -Math.PI / 2;
     this.scene.add(this.pin, this.glow);
 
-    // PLOT #N AVAILABLE sign
-    const postMat = new THREE.MeshLambertMaterial({ color: "#7A4E2D" });
-    const frameMat = new THREE.MeshLambertMaterial({ color: "#C24038" });
-    for (const x of [-1.7, 1.7]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, 3.2, 0.22), postMat);
-      post.position.set(x, 1.6, 0);
-      post.castShadow = true;
-      this.sign.add(post);
-    }
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(SIGN.w + 0.2, SIGN.h + 0.2, 0.12), frameMat);
-    frame.position.set(0, 3.0, 0);
-    frame.castShadow = true;
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(SIGN.w, SIGN.h), this.signMat);
-    board.position.set(0, 3.0, 0.07);
-    this.sign.add(frame, board);
-    this.scene.add(this.sign);
+    // PLOT #N AVAILABLE sign on the next free plot, and the BEING BUILT sign on your house.
+    this.makeSignBoard(this.sign, this.signMat);
+    this.makeSignBoard(this.ownSign, this.ownSignMat);
+    this.ownSign.visible = false;
+    this.scene.add(this.sign, this.ownSign);
 
     // Controls: drag to pan, right-drag / two fingers to rotate, wheel / pinch to zoom.
     this.controls = new MapControls(this.camera, canvas);
@@ -276,7 +370,7 @@ export class LandEngine {
     this.controls.dampingFactor = 0.08;
     this.controls.screenSpacePanning = false;
     this.controls.minDistance = 22;
-    this.controls.maxDistance = 1200;
+    this.controls.maxDistance = 3000;
     this.controls.minPolarAngle = 0.12;
     this.controls.maxPolarAngle = 1.22;
     this.controls.zoomToCursor = true;
@@ -296,69 +390,58 @@ export class LandEngine {
     this.io.observe(host);
     this.resize();
 
-    // Start high above the city until the first data arrives.
+    // Start high above Town 1 until the first data arrives.
     this.camera.position.set(0, 520, 620);
     this.controls.target.set(0, 0, 0);
     this.controls.update();
     this.raf = requestAnimationFrame(this.loop);
   }
 
-  setData(names: readonly string[], mine: number | null, mineName: string | null) {
-    const first = this.data === null;
-    const justJoined = !first && mine !== null && this.mine === null;
-    this.mine = mine;
-    this.mineName = mineName;
+  // New data from the page (first load, after joining, or a refresh).
+  setData(view: WorldView) {
+    const first = this.view === null;
+    const justJoined = !first && view.me !== null && this.me === null;
+    this.view = view;
+    this.me = view.me;
+    this.towns.set(view.town, new Map(view.plots));
+    if (first || justJoined) this.active = view.town;
 
-    const prev = this.data;
-    const data = buildLand(names, mine);
-    this.data = data;
-    this.city.geometry = data.city;
-    this.dash.geometry = data.dash;
-    this.xw.geometry = data.xw;
-    this.xwFar.geometry = data.xwFar;
-    this.own.geometry = data.own?.geo ?? new THREE.BufferGeometry();
-    if (prev) {
-      for (const g of [prev.city, prev.dash, prev.xw, prev.xwFar, prev.own?.geo]) g?.dispose();
+    this.updateWorld();
+    this.rebuildTown();
+
+    const now = performance.now();
+    if (first) {
+      this.intro();
+      if (this.me && townOf(this.me.plot) === this.active) this.startReveal(now + 300 + 2800 * 0.55);
+    } else if (justJoined) {
+      this.flyTo(this.focusView(), 1600);
+      this.startReveal(now + 700);
     }
-    this.boxes = data.houses.map((hit) => ({ hit, box: new THREE.Box3(hit.min, hit.max) }));
-    this.hovered = null;
-    this.selected = null;
-    this.opts.onHouseCount?.(names.length);
-
-    if (data.own) {
-      this.own.visible = true;
-      this.own.position.set(data.own.lot.x, 0, data.own.lot.z);
-      this.focus = { lot: data.own.lot, n: data.own.n, baseY: data.own.top - 1.6, own: true };
-    } else {
-      this.own.visible = false;
-      this.focus = { lot: data.next.lot, n: data.next.n, baseY: Y0, own: false };
-    }
-    this.growStart = justJoined && !this.reduced ? performance.now() + 500 : -1;
-
-    // Sign on the next free plot, near its street-side corner.
-    const nl = data.next.lot;
-    const [sx, sz] = rot(-3.4, 6.6, nl.rot);
-    this.sign.position.set(nl.x + sx, Y0, nl.z + sz);
-    this.sign.rotation.y = nl.rot + 0.25;
-    this.signMat.map?.dispose();
-    this.signMat.map = signTex(data.next.n);
-    this.signMat.needsUpdate = true;
-
-    this.controls.maxDistance = clamp(Math.max(data.half.x, data.half.z) * 2.2, 700, 2600);
-
-    if (first) this.intro();
-    else if (justJoined) this.flyTo(this.focusView(), 1600);
+    this.emitInfo(true);
   }
 
   // Fly to your house, or to the next free plot if you don't have one yet.
-  flyToFocus() {
+  async flyToFocus() {
     this.selected = null;
+    const f = this.focus;
+    if (!f) return;
+    await this.activate(f.lot.town);
+    if (this.disposed) return;
     this.flyTo(this.focusView(), 1300);
+    if (f.own) this.startReveal(performance.now() + 700);
   }
 
-  // Zoom out to see the whole city.
-  flyToOverview() {
-    this.flyTo(this.overview(), 1600);
+  // Zoom out over every town.
+  flyToWorld() {
+    this.flyTo(this.worldView(), 1700);
+  }
+
+  // Look at one whole town from above.
+  async flyToTown(town: number) {
+    this.selected = null;
+    await this.activate(town);
+    if (this.disposed) return;
+    this.flyTo(this.townView(town), 1500);
   }
 
   dispose() {
@@ -376,7 +459,9 @@ export class LandEngine {
     this.scene.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) {
-        m.geometry?.dispose();
+        // Instanced meshes share their shapes (SHAPES); only their per-instance data is theirs.
+        if ((m as THREE.InstancedMesh).isInstancedMesh) (m as THREE.InstancedMesh).dispose();
+        else m.geometry?.dispose();
         const mats = Array.isArray(m.material) ? m.material : [m.material];
         for (const mat of mats) {
           (mat as THREE.MeshBasicMaterial).map?.dispose();
@@ -390,6 +475,271 @@ export class LandEngine {
     this.labels.remove();
   }
 
+  // ---------- data -> scene ----------
+
+  private next() {
+    return (this.view?.last ?? 0) + 1;
+  }
+
+  private openTown() {
+    return townOf(this.next());
+  }
+
+  private houses(t: number) {
+    return this.view ? housesInTown(this.view, t) : 0;
+  }
+
+  // Everything that depends on the world's numbers: which towns are drawn, the far towns, the
+  // PLOT sign, the pin, town labels.
+  private updateWorld() {
+    // Draw every town up to the next ring of the grid past the one being filled, so there's always
+    // fresh empty land around.
+    const maxTown = lastTownOfRing(townRing(this.openTown()) + 1);
+    if (maxTown !== this.maxTown) {
+      this.maxTown = maxTown;
+      this.ext = extentOf(maxTown);
+      this.rebuildCountry();
+      this.rebuildTownTags();
+      this.controls.maxDistance = this.worldView().radius * 1.3;
+    }
+    this.rebuildFar();
+    this.updateTownTags();
+
+    // Focus: your house, or the next free plot.
+    const me = this.me;
+    if (me) {
+      const { lot, spec } = specForPlot(me.plot);
+      this.focus = { lot, n: me.plot, baseY: siteTop(spec) - 1.6, own: true };
+    } else {
+      const n = this.next();
+      this.focus = { lot: lotForPlot(n), n, baseY: Y0, own: false };
+    }
+
+    // Sign on the next free plot, near its street-side corner.
+    const nl = lotForPlot(this.next());
+    const [sx, sz] = rot(-3.4, 6.6, nl.rot);
+    this.sign.position.set(nl.x + sx, Y0, nl.z + sz);
+    this.sign.rotation.y = nl.rot + 0.25;
+    this.signMat.map?.dispose();
+    this.signMat.map = boardTex([
+      [`PLOT #${fmt(nl.plot)}`, nl.plot >= 10000 ? 130 : 160],
+      ["AVAILABLE", 96],
+      [site.townName(nl.town).toUpperCase(), 70],
+    ]);
+    this.signMat.needsUpdate = true;
+  }
+
+  private addInst(group: THREE.Group, list: Inst, geo: THREE.BufferGeometry, cast = false) {
+    if (!list.count) return;
+    const m = list.mesh(geo, this.inst);
+    m.castShadow = cast;
+    m.receiveShadow = true;
+    group.add(m);
+  }
+
+  private addTrees(group: THREE.Group, t: Trees) {
+    this.addInst(group, t.crowns, SHAPES.ico);
+    this.addInst(group, t.pines, SHAPES.cone);
+    this.addInst(group, t.trunks, SHAPES.cyl);
+  }
+
+  private clearGroup(group: THREE.Group) {
+    for (const o of [...group.children]) {
+      const m = o as THREE.Mesh;
+      if ((m as THREE.InstancedMesh).isInstancedMesh) (m as THREE.InstancedMesh).dispose();
+      else m.geometry?.dispose();
+      group.remove(o);
+    }
+  }
+
+  private rebuildCountry() {
+    this.clearGroup(this.country);
+    const c = buildCountry(this.ext);
+    const ground = new THREE.Mesh(c.ground, this.lam);
+    ground.receiveShadow = true;
+    this.country.add(ground);
+    this.addInst(this.country, c.fields, SHAPES.quad);
+    this.addTrees(this.country, c.trees);
+  }
+
+  private rebuildFar() {
+    this.clearGroup(this.far);
+    const f = buildFarTowns(this.maxTown, this.active, (t) => this.houses(t));
+    const ground = new THREE.Mesh(f.ground, this.lam);
+    ground.receiveShadow = true;
+    this.far.add(ground);
+    this.addInst(this.far, f.bodies, SHAPES.box);
+    this.addInst(this.far, f.roofs, SHAPES.roof);
+    this.addInst(this.far, f.cranes, SHAPES.box);
+    this.addTrees(this.far, f.trees);
+  }
+
+  private rebuildTown() {
+    if (!this.active) return;
+    const plots = this.towns.get(this.active) ?? new Map<number, string>();
+    const mine = this.me && townOf(this.me.plot) === this.active ? this.me.plot : null;
+    const prev = this.built;
+    const built = buildTown(this.active, plots, mine, this.next());
+    this.built = built;
+    this.city.geometry = built.city;
+    this.dash.geometry = built.dash;
+    this.xw.geometry = built.xw;
+    this.xwFar.geometry = built.xwFar;
+    if (prev) for (const g of [prev.city, prev.dash, prev.xw, prev.xwFar]) g.dispose();
+    this.boxes = built.houses.map((hit) => ({ hit, box: new THREE.Box3(hit.min, hit.max) }));
+    this.hovered = null;
+    this.selected = null;
+    this.setOwn(built.own);
+  }
+
+  // Your house site, its tower crane and its BEING BUILT sign.
+  private setOwn(o: OwnBuild | null) {
+    for (const m of [this.ownSite, this.mast, this.craneArm, this.trolley, this.cable, this.load]) {
+      m.geometry.dispose();
+      m.geometry = new THREE.BufferGeometry();
+    }
+    this.own.visible = Boolean(o);
+    this.ownSign.visible = Boolean(o);
+    this.crane = null;
+    if (!o) return;
+
+    this.own.position.set(o.lot.x, 0, o.lot.z);
+    this.ownSite.geometry = o.site;
+
+    const side = o.n % 2 ? 1 : -1;
+    const [mx, mz] = craneSpot(o.spec, side);
+    const H = Math.max(craneHeight(o.spec.floors), o.top - Y0 + 11);
+    const geo = (fill: (b: Builder) => void) => {
+      const b = new Builder();
+      fill(b);
+      return b.geometry();
+    };
+    this.mast.geometry = geo((b) => addCraneMast(placed(b, mx, Y0, mz, 1), H));
+    this.craneArm.geometry = geo((b) => addCraneTop(b));
+    this.trolley.geometry = geo((b) => addCraneTrolley(b));
+    this.cable.geometry = geo((b) => addCraneCable(b));
+    this.load.geometry = geo((b) => addCraneLoad(b));
+    this.craneTop.position.set(mx, Y0 + H, mz);
+    // The hook works over the house's side wall on the crane's side, clear of the pin in the middle.
+    const [hx, hz] = rot(side * 4.3, 0.3, o.lot.rot);
+    this.crane = { H, base: Math.atan2(-(hz - mz), hx - mx), reach: Math.hypot(hx - mx, hz - mz), top: o.top };
+    this.poseCrane(0);
+
+    const [sx, sz] = rot(-3.4, o.spec.d / 2 + 2.6, o.lot.rot);
+    this.ownSign.position.set(o.lot.x + sx, Y0, o.lot.z + sz);
+    this.ownSign.rotation.y = o.lot.rot + 0.25;
+    this.ownSign.scale.setScalar(1.25);
+    const name = `@${this.me?.username ?? "you"}`;
+    this.ownSignMat.map?.dispose();
+    this.ownSignMat.map = boardTex(
+      [
+        ["BEING BUILT", 104],
+        [name, name.length > 16 ? 56 : 72],
+        [`HOUSE #${fmt(o.n)} · ${site.townName(o.lot.town).toUpperCase()}`, 52],
+      ],
+      true,
+    );
+    this.ownSignMat.needsUpdate = true;
+  }
+
+  private poseCrane(secs: number) {
+    const c = this.crane;
+    if (!c) return;
+    const s = this.reduced ? 0 : secs;
+    this.craneTop.rotation.y = c.base + 0.12 * Math.sin(s * 0.23);
+    this.hook.position.set(c.reach + 1.6 * Math.sin(s * 0.31), HOOK_Y, 0);
+    const lift = 2.4 + 1.3 * Math.sin(s * 0.41);
+    const len = Math.max(1, Y0 + c.H + HOOK_Y - LOAD_DROP - (c.top + lift));
+    this.cable.scale.set(1, len, 1);
+    this.load.position.set(0, -len, 0);
+  }
+
+  private startReveal(at: number) {
+    if (this.reduced || !this.built?.own) return;
+    this.revealStart = at;
+    this.revealPlane.constant = Y0;
+  }
+
+  // Load a town's houses (if needed) and draw it in full detail.
+  private async activate(t: number) {
+    if (!this.view || t < 1 || t > this.maxTown || t === this.active || t === this.loading) return;
+    this.loading = t;
+    this.emitInfo();
+    if (!this.towns.has(t) && t <= this.openTown() && this.houses(t) > 0) {
+      const v = await this.opts.loadTown(t).catch(() => null);
+      if (this.disposed) return;
+      if (!v) {
+        this.failed.set(t, performance.now());
+        if (this.loading === t) this.loading = 0;
+        this.emitInfo();
+        return;
+      }
+      this.towns.set(v.town, new Map(v.plots));
+      if (v.last !== this.view.last) {
+        this.view = { ...this.view, houses: v.houses, last: v.last, towns: v.towns };
+        this.updateWorld();
+      }
+    }
+    if (this.loading !== t) return; // another town was asked for meanwhile
+    this.loading = 0;
+    this.active = t;
+    this.rebuildFar();
+    this.rebuildTown();
+    this.emitInfo();
+  }
+
+  private emitInfo(force = false) {
+    if (!this.view || !this.opts.onView) return;
+    const t = this.underTown || this.active || 1;
+    const info: ViewInfo = {
+      town: t,
+      houses: this.houses(t),
+      open: this.openTown(),
+      towns: this.maxTown,
+      zoomedOut: this.camera.position.distanceTo(this.controls.target) > LABEL_D * 1.4,
+      loading: this.loading !== 0,
+    };
+    const key = `${info.town}|${info.houses}|${info.open}|${info.towns}|${info.zoomedOut}|${info.loading}`;
+    if (!force && key === this.lastInfo) return;
+    this.lastInfo = key;
+    this.opts.onView(info);
+  }
+
+  // ---------- town labels (shown when zoomed out) ----------
+
+  private rebuildTownTags() {
+    for (const { tag } of this.townTags) tag.el.remove();
+    this.townTags = [];
+    for (let t = 1; t <= this.maxTown; t++) {
+      const tag = makeTag("#FFFFFF", "#2C2F34");
+      this.labels.insertBefore(tag.el, this.hoverTag.el);
+      this.townTags.push({ t, tag });
+    }
+  }
+
+  private updateTownTags() {
+    const open = this.openTown();
+    const mine = this.me ? townOf(this.me.plot) : 0;
+    for (const { t, tag } of this.townTags) {
+      const n = this.houses(t);
+      const sub =
+        t === mine
+          ? "Your house is here"
+          : t < open
+            ? `Full · ${fmt(n)} houses`
+            : t === open
+              ? `${fmt(n)} / ${fmt(TOWN_SIZE)} · filling now`
+              : t === open + 1
+                ? "Opens next"
+                : "Empty land";
+      setTagText(tag, site.townName(t), sub);
+      const pill = tag.el.firstElementChild as HTMLDivElement;
+      const bg = t === mine ? "#F7C631" : t === open ? "#FFFFFF" : "rgba(255,255,255,0.86)";
+      pill.style.background = bg;
+      (tag.el.lastElementChild as HTMLDivElement).style.background = bg;
+    }
+  }
+
   // ---------- camera ----------
 
   private portrait() {
@@ -399,19 +749,20 @@ export class LandEngine {
   // Look at the plot from its street side, choosing an angle the plaza's tall landmarks don't block.
   private focusView(): View {
     const f = this.focus;
-    if (!f) return this.overview();
+    if (!f) return this.townView(1);
     const front = f.lot.rot === 0 ? 0 : Math.PI;
     const target = new THREE.Vector3(f.lot.x, Y0 + (f.own ? 3 : 1.5), f.lot.z);
-    const radius = this.portrait() ? 64 : 70;
+    const radius = f.own ? (this.portrait() ? 74 : 80) : this.portrait() ? 64 : 70;
+    const [ox, oz] = townCenter(f.lot.town);
     const tries: [number, number][] = [];
     for (const phi of [0.98, 0.8]) for (const off of [0.42, -0.42, 0.9, -0.9, 1.3, -1.3]) tries.push([phi, front + off]);
-    const clear = tries.find(([phi, theta]) => !this.blocked(target, radius, phi, theta)) ?? [0.62, front + 0.42];
+    const clear = tries.find(([phi, theta]) => !this.blocked(target, radius, phi, theta, ox, oz)) ?? [0.62, front + 0.42];
     return { target, radius, phi: clear[0], theta: clear[1] };
   }
 
   // True if a plaza landmark would sit in the middle of the shot. The test widens towards the camera,
   // because things close to the lens fill more of the frame.
-  private blocked(target: THREE.Vector3, radius: number, phi: number, theta: number) {
+  private blocked(target: THREE.Vector3, radius: number, phi: number, theta: number, ox: number, oz: number) {
     const cam = new THREE.Vector3().copy(target).add(new THREE.Vector3().setFromSpherical(new THREE.Spherical(radius, phi, theta)));
     for (let s = 0; s <= 24; s++) {
       const t = s / 24;
@@ -420,19 +771,37 @@ export class LandEngine {
       const z = THREE.MathUtils.lerp(target.z, cam.z, t);
       for (const lm of LANDMARKS) {
         if (y > lm.h) continue;
-        if (Math.hypot(x - lm.x, z - lm.z) < lm.r + 0.32 * radius * t) return true;
+        if (Math.hypot(x - ox - lm.x, z - oz - lm.z) < lm.r + 0.32 * radius * t) return true;
       }
     }
     return false;
   }
 
-  private overview(): View {
-    const half = this.data?.half ?? { x: 300, z: 250 };
+  private townView(t: number): View {
+    const [x, z] = townCenter(t);
     return {
-      target: new THREE.Vector3(0, 0, 0),
-      radius: clamp(Math.max(half.x, half.z) * (this.portrait() ? 2.4 : 1.7), 380, 2400),
+      target: new THREE.Vector3(x, 0, z),
+      radius: Math.max(TOWN_HALF.x, TOWN_HALF.z) * (this.portrait() ? 2.9 : 2.2),
       phi: 0.82,
       theta: 0.35,
+    };
+  }
+
+  // Every drawn town in frame: fit the wider of the grid's width and depth to the open part of the screen.
+  private worldView(): View {
+    const e = this.ext;
+    const hx = (e.maxX - e.minX) / 2;
+    const hz = (e.maxZ - e.minZ) / 2;
+    const free = Math.max(0.35, 1 - clamp(this.opts.leftInset(), 0, this.width * 0.6) / this.width);
+    const aspect = (this.width * free) / this.height;
+    const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const fitX = hx / (tanV * aspect);
+    const fitZ = (hz * 0.95) / tanV; // depth looks shorter from this tilted angle
+    return {
+      target: new THREE.Vector3((e.minX + e.maxX) / 2, 0, (e.minZ + e.maxZ) / 2),
+      radius: Math.max(fitX, fitZ) * 1.04,
+      phi: 0.7,
+      theta: 0.08,
     };
   }
 
@@ -442,7 +811,7 @@ export class LandEngine {
       this.applyView(v);
       return;
     }
-    const start = this.overview();
+    const start = this.townView(this.focus?.lot.town ?? 1);
     start.theta = v.theta - 0.7;
     start.phi = 0.7;
     this.applyView(start);
@@ -503,10 +872,14 @@ export class LandEngine {
 
   // ---------- picking ----------
 
-  private pick(clientX: number, clientY: number): HouseHit | null {
+  private setRay(clientX: number, clientY: number) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     this.ray.setFromCamera(ndc, this.camera);
+  }
+
+  private pick(clientX: number, clientY: number): HouseHit | null {
+    this.setRay(clientX, clientY);
     let best: HouseHit | null = null;
     let bestD = Infinity;
     const p = new THREE.Vector3();
@@ -522,6 +895,17 @@ export class LandEngine {
     return best;
   }
 
+  // The town under a screen point (0 if none).
+  private pickTown(clientX: number, clientY: number) {
+    this.setRay(clientX, clientY);
+    const p = this.ray.ray.intersectPlane(this.groundPlane, new THREE.Vector3());
+    if (!p) return 0;
+    const t = townAtPoint(p.x, p.z);
+    if (t < 1 || t > this.maxTown) return 0;
+    const [x, z] = townCenter(t);
+    return Math.abs(p.x - x) < TOWN_HALF.x + 40 && Math.abs(p.z - z) < TOWN_HALF.z + 40 ? t : 0;
+  }
+
   private onPointerDown = (e: PointerEvent) => {
     this.cancelFlight();
     this.down = { x: e.clientX, y: e.clientY, t: performance.now() };
@@ -530,7 +914,8 @@ export class LandEngine {
   private onPointerMove = (e: PointerEvent) => {
     if (e.pointerType !== "mouse" || e.buttons !== 0) return;
     this.hovered = this.pick(e.clientX, e.clientY);
-    this.renderer.domElement.style.cursor = this.hovered ? "pointer" : "";
+    const far = this.camera.position.distanceTo(this.controls.target) > LABEL_D;
+    this.renderer.domElement.style.cursor = this.hovered || (far && this.pickTown(e.clientX, e.clientY)) ? "pointer" : "";
   };
 
   private onPointerUp = (e: PointerEvent) => {
@@ -538,7 +923,13 @@ export class LandEngine {
     this.down = null;
     if (!d) return;
     const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y);
-    if (moved < 6 && performance.now() - d.t < 450) this.selected = this.pick(e.clientX, e.clientY);
+    if (moved >= 6 || performance.now() - d.t >= 450) return;
+    this.selected = this.pick(e.clientX, e.clientY);
+    // Zoomed out, a tap on a town flies there.
+    if (!this.selected && this.camera.position.distanceTo(this.controls.target) > LABEL_D) {
+      const t = this.pickTown(e.clientX, e.clientY);
+      if (t) void this.flyToTown(t);
+    }
   };
 
   private onPointerLeave = () => {
@@ -561,11 +952,12 @@ export class LandEngine {
     if (inset > 0) this.camera.setViewOffset(w, h, -inset / 2, 0, w, h);
     else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
+    if (this.maxTown) this.controls.maxDistance = this.worldView().radius * 1.3;
   }
 
-  private placeTag(tag: { el: HTMLDivElement }, x: number, y: number, z: number, show: boolean) {
-    if (!show) {
-      tag.el.style.opacity = "0";
+  private placeTag(tag: { el: HTMLDivElement }, x: number, y: number, z: number, show: boolean, opacity = 1) {
+    if (!show || opacity <= 0.01) {
+      if (tag.el.style.opacity !== "0") tag.el.style.opacity = "0";
       return;
     }
     const v = this.tmp.set(x, y, z).project(this.camera);
@@ -575,7 +967,7 @@ export class LandEngine {
     }
     const px = ((v.x + 1) / 2) * this.width;
     const py = ((1 - v.y) / 2) * this.height;
-    tag.el.style.opacity = "1";
+    tag.el.style.opacity = opacity.toFixed(2);
     tag.el.style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0) translate(-50%, -100%)`;
   }
 
@@ -593,38 +985,54 @@ export class LandEngine {
       this.controls.update();
     }
 
-    // Keep the view over the city.
-    const data = this.data;
+    // Keep the view over the land.
     const target = this.controls.target;
-    if (data) {
-      const cx = clamp(target.x, -data.half.x, data.half.x);
-      const cz = clamp(target.z, -data.half.z, data.half.z);
-      const cy = clamp(target.y, 0, 30);
-      const dx = cx - target.x;
-      const dy = cy - target.y;
-      const dz = cz - target.z;
-      if (dx || dy || dz) {
-        target.set(cx, cy, cz);
-        this.camera.position.x += dx;
-        this.camera.position.y += dy;
-        this.camera.position.z += dz;
-      }
+    const e = this.ext;
+    const cx = clamp(target.x, e.minX - 300, e.maxX + 300);
+    const cz = clamp(target.z, SEA_Z + 60, e.maxZ + 300);
+    const cy = clamp(target.y, 0, 30);
+    const dx = cx - target.x;
+    const dy = cy - target.y;
+    const dz = cz - target.z;
+    if (dx || dy || dz) {
+      target.set(cx, cy, cz);
+      this.camera.position.x += dx;
+      this.camera.position.y += dy;
+      this.camera.position.z += dz;
     }
 
-    // Near plane, fog and road-paint detail follow the camera distance (stops far-away flicker).
+    // Near/far planes, sky, fog and road-paint detail follow the camera distance (stops far-away flicker).
     const d = this.camera.position.distanceTo(target);
-    const near = clamp(d * 0.04, 0.5, 30);
-    if (Math.abs(near - this.camera.near) > 0.01 * near) {
+    const near = clamp(d * 0.04, 0.5, 400);
+    const farPlane = Math.max(16000, d * 4);
+    if (Math.abs(near - this.camera.near) > 0.01 * near || Math.abs(farPlane - this.camera.far) > 0.02 * farPlane) {
       this.camera.near = near;
+      this.camera.far = farPlane;
       this.camera.updateProjectionMatrix();
     }
+    this.sky.scale.setScalar((farPlane * 0.45) / SKY_R);
     this.fog.near = d * 1.6 + 60;
     this.fog.far = d * 7 + 900;
     this.sky.position.copy(this.camera.position);
-    const far = d > 200;
+    const farView = d > 200;
     this.dash.visible = d < 520;
-    this.xw.visible = !far;
-    this.xwFar.visible = far;
+    this.xw.visible = !farView;
+    this.xwFar.visible = farView;
+
+    // The town under the camera: draw it in detail once you've settled over it.
+    if (this.view) {
+      const t = townAtPoint(target.x, target.z);
+      const under = t >= 1 && t <= this.maxTown ? t : this.active;
+      if (under !== this.underTown) {
+        this.underTown = under;
+        this.underSince = now;
+      }
+      const failedAt = this.failed.get(under) ?? -Infinity;
+      if (!this.flight && under !== this.active && d < DETAIL_D && now - this.underSince > 350 && now - failedAt > 10000) {
+        void this.activate(under);
+      }
+      this.emitInfo();
+    }
 
     // Sun shadow box follows the view, sized in sqrt(2) steps and snapped to texels so shadows don't swim.
     const half = Math.min(905, 45 * 2 ** (Math.ceil(2 * Math.log2(Math.max(1, (d * 1.05) / 45))) / 2));
@@ -645,41 +1053,72 @@ export class LandEngine {
       this.sun.shadow.normalBias = 0.03 + half * 0.0018;
     }
 
-    // Your house rises out of the ground the moment you join.
-    if (this.growStart >= 0) {
-      const t = clamp((now - this.growStart) / 900, 0, 1);
-      const s = t <= 0 ? 0.001 : backOut(t);
-      this.own.scale.set(0.6 + 0.4 * Math.min(1, s), Math.max(0.001, s), 0.6 + 0.4 * Math.min(1, s));
+    const secs = now / 1000;
+
+    // Your house goes up from the ground, layer by layer; the crane keeps working.
+    const own = this.built?.own;
+    let lift = 1;
+    if (own && this.revealStart >= 0) {
+      const t = clamp((now - this.revealStart) / REVEAL_MS, 0, 1);
+      lift = easeOut(t);
+      this.revealPlane.constant = Y0 + (own.top + 0.6 - Y0) * lift;
       if (t >= 1) {
-        this.growStart = -1;
-        this.own.scale.set(1, 1, 1);
+        this.revealStart = -1;
+        this.revealPlane.constant = 1e5;
       }
     }
+    if (this.own.visible) this.poseCrane(secs);
 
     // Pin bob + glow pulse on the focus plot.
     const f = this.focus;
-    const secs = now / 1000;
     if (f) {
       const bob = this.reduced ? 0 : Math.sin(secs * 2.4) * 0.35;
-      const lift = this.growStart >= 0 ? clamp((now - this.growStart) / 900, 0, 1) : 1;
       const baseY = f.own ? Y0 + (f.baseY - Y0) * lift : f.baseY;
       this.pin.position.set(f.lot.x, baseY + bob, f.lot.z);
       this.glow.position.set(f.lot.x, Y0 + 0.1, f.lot.z);
       const pulse = this.reduced ? 1 : 1 + Math.sin(secs * 2) * 0.05;
       this.glow.scale.set(pulse, pulse, 1);
-      const typed = getPreviewName();
-      this.focusTag.pill.textContent = f.own
-        ? `@${this.mineName ?? "you"} · House #${f.n}`
-        : `@${typed || "???"} · House #${f.n}`;
-      this.placeTag(this.focusTag, f.lot.x, baseY + bob + PIN_HEIGHT + 0.8, f.lot.z, true);
+      if (f.own) {
+        setTagText(this.focusTag, `@${this.me?.username ?? "you"} · House #${fmt(f.n)}`, `Being built · ${site.townName(f.lot.town)}`);
+      } else {
+        const typed = getPreviewName();
+        setTagText(this.focusTag, `@${typed || "???"} · House #${fmt(f.n)}`, `${site.townName(f.lot.town)} · available`);
+      }
+      // Fade it out as the camera pulls up into the world view, so town labels take over.
+      const op = clamp(1 - (d - LABEL_D * 1.6) / 600, 0, 1);
+      this.placeTag(this.focusTag, f.lot.x, baseY + bob + PIN_HEIGHT + 0.8, f.lot.z, true, op);
     }
 
     // Hover (mouse) or tapped house tag.
     const h = this.hovered ?? this.selected;
-    const showHover = Boolean(h && (!f?.own || h.n !== f.n));
-    if (h && showHover) this.hoverTag.pill.textContent = `@${h.name} · #${h.n}`;
+    const showHover = Boolean(h && (!f?.own || h.n !== f.n) && d < LABEL_D);
+    if (h && showHover) setTagText(this.hoverTag, `@${h.name} · #${fmt(h.n)}`);
     this.placeTag(this.hoverTag, h?.lot.x ?? 0, (h?.top ?? 0) + 1.2, h?.lot.z ?? 0, showHover);
+
+    // Town labels when zoomed out.
+    const labelOp = clamp((d - LABEL_D) / 350, 0, 1);
+    for (const { t, tag } of this.townTags) {
+      const [x, z] = townCenter(t);
+      this.placeTag(tag, x, 60, z, labelOp > 0, labelOp);
+    }
 
     this.renderer.render(this.scene, this.camera);
   };
+
+  private makeSignBoard(group: THREE.Group, mat: THREE.MeshLambertMaterial) {
+    const postMat = new THREE.MeshLambertMaterial({ color: "#7A4E2D" });
+    const frameMat = new THREE.MeshLambertMaterial({ color: "#C24038" });
+    for (const x of [-1.7, 1.7]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, 3.2, 0.22), postMat);
+      post.position.set(x, 1.6, 0);
+      post.castShadow = true;
+      group.add(post);
+    }
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(SIGN.w + 0.2, SIGN.h + 0.2, 0.12), frameMat);
+    frame.position.set(0, 3.0, 0);
+    frame.castShadow = true;
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(SIGN.w, SIGN.h), mat);
+    board.position.set(0, 3.0, 0.07);
+    group.add(frame, board);
+  }
 }

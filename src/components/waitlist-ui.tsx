@@ -4,24 +4,23 @@ import { CheckIcon, HouseGlyph } from "@/components/icons";
 import { InstagramForm } from "@/components/instagram-form";
 import { Land } from "@/components/land/land";
 import { site } from "@/lib/site";
+import { TOWN_SIZE, nextPlot, plotInTown, townOf, type MyHouse, type WorldView } from "@/lib/world";
 
-export type Entry = { instagram_username: string; created_at: string };
+const fmt = (n: number) => n.toLocaleString("en");
 
 type ShellProps = {
   step: number;
   signedIn: boolean;
-  names: string[];
-  mine: number | null;
-  mineName: string | null;
+  view: WorldView;
   children: React.ReactNode;
 };
 
-export function Shell({ step, signedIn, names, mine, mineName, children }: ShellProps) {
+export function Shell({ step, signedIn, view, children }: ShellProps) {
   return (
     <main className="relative min-h-[100dvh] md:h-[100dvh] md:overflow-hidden">
-      {/* The city: full screen behind the card on desktop, the top of the page on phones. */}
+      {/* The world: full screen behind the card on desktop, the top of the page on phones. */}
       <div className="relative h-[58dvh] min-h-[360px] md:absolute md:inset-0 md:h-auto">
-        <Land names={names} mine={mine} mineName={mineName} />
+        <Land view={view} />
       </div>
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between p-3 md:p-6">
@@ -48,7 +47,7 @@ export function Shell({ step, signedIn, names, mine, mineName, children }: Shell
           id="waitlist-card"
           className="animate-rise rounded-[1.75rem] border border-black/5 bg-white/95 p-6 shadow-[0_24px_60px_-28px_rgba(30,40,50,0.55)] backdrop-blur-md md:max-h-[calc(100dvh-6.5rem)] md:overflow-y-auto"
         >
-          <Counter count={names.length} mine={mine} />
+          <Counter view={view} />
           <h1 className="mt-4 text-3xl font-semibold leading-[0.98] tracking-tighter text-zinc-950 md:text-[2.5rem]">
             {site.headline}
           </h1>
@@ -68,11 +67,13 @@ export function Shell({ step, signedIn, names, mine, mineName, children }: Shell
   );
 }
 
-function Counter({ count, mine }: { count: number; mine: number | null }) {
+function Counter({ view }: { view: WorldView }) {
+  const count = view.houses;
+  const next = nextPlot(view);
   const text =
     count === 0
-      ? "No houses yet. Plot #1 is waiting."
-      : `${count.toLocaleString("en")} ${count === 1 ? "house" : "houses"} built${mine ? "" : ` · plot #${count + 1} is next`}`;
+      ? `No houses yet. House #1 in ${site.townName(1)} is waiting.`
+      : `${fmt(count)} ${count === 1 ? "house" : "houses"} being built${view.me ? "" : ` · #${fmt(next)} is next`}`;
   return (
     <p className="inline-flex items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700">
       <span className="size-1.5 animate-pulse-dot rounded-full bg-accent" />
@@ -119,7 +120,7 @@ export function SignInPanel({ authFailed, nextPlot }: { authFailed: boolean; nex
       )}
       <GoogleButton />
       <p className="text-sm text-zinc-500">
-        Next you&apos;ll add your Instagram, and plot #{nextPlot} gets your house.
+        Next you&apos;ll add your Instagram, and house #{fmt(nextPlot)} in {site.townName(townOf(nextPlot))} is yours.
       </p>
     </div>
   );
@@ -136,42 +137,37 @@ export function JoinPanel({ email, nextPlot }: { email: string | null; nextPlot:
   );
 }
 
-export function OnListPanel({
-  entry,
-  position,
-  email,
-}: {
-  entry: Entry;
-  position: number | null;
-  email: string | null;
-}) {
-  const joined = new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(entry.created_at));
+export function OnListPanel({ me, email }: { me: MyHouse; email: string | null }) {
+  const joined = new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(me.createdAt));
+  const town = site.townName(townOf(me.plot));
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <p className="text-sm text-zinc-500">Your house is built</p>
-          <p className="mt-1 font-mono text-5xl font-semibold tracking-tight text-zinc-950">
-            {position ? `#${position}` : "Saved"}
-          </p>
+          <p className="text-sm text-zinc-500">You&apos;re on the waitlist</p>
+          <p className="mt-1 font-mono text-5xl font-semibold tracking-tight text-zinc-950">#{fmt(me.plot)}</p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent">
-          <CheckIcon className="size-3.5" />
-          On the list
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+          <span className="size-1.5 animate-pulse-dot rounded-full bg-amber-500" />
+          Being built
         </span>
       </div>
+      <p className="text-[15px] leading-relaxed text-zinc-700">
+        Your house is being built on plot {fmt(plotInTown(me.plot))} of {fmt(TOWN_SIZE)} in {town}. It&apos;s the one with
+        the crane and the yellow pin.
+      </p>
       <dl className="grid grid-cols-1 gap-3 border-t border-zinc-200/80 pt-4 text-sm sm:grid-cols-2">
         <div className="min-w-0">
           <dt className="text-zinc-500">Instagram</dt>
-          <dd className="mt-0.5 truncate font-mono text-zinc-900">@{entry.instagram_username}</dd>
+          <dd className="mt-0.5 truncate font-mono text-zinc-900">@{me.username}</dd>
         </div>
         <div className="min-w-0">
           <dt className="text-zinc-500">Google account</dt>
           <dd className="mt-0.5 truncate text-zinc-900">{email ?? "Signed in"}</dd>
         </div>
       </dl>
-      <p className="text-xs text-zinc-500">Joined {joined}. Your house is the one with the yellow pin.</p>
+      <p className="text-xs text-zinc-500">Joined {joined}.</p>
     </div>
   );
 }

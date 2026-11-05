@@ -9,7 +9,22 @@ export const firstPlotOf = (town: number) => (town - 1) * TOWN_SIZE + 1;
 
 // One house on the map. start / done: when building started and when it finishes (Unix seconds,
 // from the database: 30 days after joining, 2 days sooner per invited friend, 3 days at the least).
-export type House = { plot: number; username: string; start: number; done: number; waves: number };
+// The rest is the person who lives there (src/components/people/look.ts): their look number, age,
+// personality, job (null: waiting for one), income in coins a day, and whether their owner is in
+// the game right now.
+export type House = {
+  plot: number;
+  username: string;
+  start: number;
+  done: number;
+  waves: number;
+  look: number;
+  age: number;
+  trait: string;
+  job: string | null;
+  income: number;
+  online: boolean;
+};
 
 export type MyHouse = House & {
   createdAt: string;
@@ -64,13 +79,28 @@ export const parseWorldView = (data: unknown): WorldView | null => {
   const plots: House[] = [];
   for (const p of d.plots) {
     if (!Array.isArray(p) || !isInt(p[0]) || typeof p[1] !== "string") continue;
-    plots.push({ plot: p[0], username: p[1], start: int(p[2]), done: int(p[3]), waves: int(p[4]) });
+    plots.push({
+      plot: p[0],
+      username: p[1],
+      start: int(p[2]),
+      done: int(p[3]),
+      waves: int(p[4]),
+      // Older databases don't send the person yet; the map then works their look out itself.
+      look: isInt(p[5]) && p[5] >= 0 ? p[5] : -1,
+      age: int(p[6]),
+      trait: typeof p[7] === "string" ? p[7] : "",
+      job: typeof p[8] === "string" && p[8] ? p[8] : null,
+      income: int(p[9]),
+      online: p[10] === true,
+    });
   }
 
   let me: MyHouse | null = null;
   if (d.me && typeof d.me === "object") {
     const m = d.me as Record<string, unknown>;
     if (isInt(m.plot) && typeof m.username === "string" && typeof m.createdAt === "string") {
+      // Your own person is in `plots` (your town is the one sent) when the database knows them.
+      const own = plots.find((p) => p.plot === m.plot);
       me = {
         plot: m.plot,
         username: m.username,
@@ -80,6 +110,12 @@ export const parseWorldView = (data: unknown): WorldView | null => {
         waves: int(m.waves),
         invites: int(m.invites),
         unread: int(m.unread),
+        look: own?.look ?? -1,
+        age: own?.age ?? 0,
+        trait: own?.trait ?? "",
+        job: own?.job ?? null,
+        income: own?.income ?? 0,
+        online: true,
       };
     }
   }

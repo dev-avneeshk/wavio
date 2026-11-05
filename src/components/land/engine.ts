@@ -26,6 +26,11 @@ import {
   type OwnBuild,
   type TownBuild,
 } from "./build";
+import type { GameEvent } from "@/lib/game";
+import type { TownFeed } from "@/lib/game-api";
+import type { LiveLink } from "@/lib/game-live";
+import { tallThings } from "../people/nav";
+import { People, type Near, type PersonInfo } from "../people/people";
 import { siteTop, specForPlot } from "./spec";
 import { SHAPES, buildCountry, buildFarTowns, extentOf, type Extent, type Inst, type Trees } from "./country";
 import { Builder, rot } from "./geo";
@@ -238,6 +243,28 @@ export type LandEngineOptions = {
   onSelect?: (sel: Selection | null) => void;
   // A house to open the map on (from a shared link), instead of your own house.
   startAt?: number | null;
+  // What's going on in a town (public.town_events), for its people to act out.
+  loadFeed?: (town: number) => Promise<TownFeed | null>;
+  // Live positions of other players (players in the game only).
+  live?: LiveLink | null;
+  // The person someone tapped (their card), refreshed every second while it's open.
+  onSelectPerson?: (info: PersonInfo | null) => void;
+  // Someone within reach of your person while you play.
+  onNear?: (near: Near) => void;
+  // Play mode started or ended (also when it can't start yet).
+  onPlay?: (on: boolean) => void;
+};
+
+// Keys that walk your person (arrows or WASD), and Shift to run.
+const KEYS: Record<string, [number, number]> = {
+  KeyW: [0, 1],
+  ArrowUp: [0, 1],
+  KeyS: [0, -1],
+  ArrowDown: [0, -1],
+  KeyA: [-1, 0],
+  ArrowLeft: [-1, 0],
+  KeyD: [1, 0],
+  ArrowRight: [1, 0],
 };
 
 // How long a message bubble stays over the sender's house.
@@ -345,6 +372,23 @@ export class LandEngine {
   private ray = new THREE.Raycaster();
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
+  // The people living in the town drawn in detail, and you walking yours around (play mode).
+  private people: People;
+  private inGame = false; // the signed-in player is in the game (their person follows them)
+  private playing = false; // play mode: camera behind your person, keys / stick walk them
+  private playWanted = false; // asked for play mode before your person was ready
+  private playStarting = false;
+  private keys = new Set<string>();
+  private stick = { x: 0, y: 0, run: false };
+  private running = false; // Shift, or the run button
+  private lastFrame = 0;
+  private peopleAt = 0;
+  private stepDelta = new THREE.Vector3();
+  private playerAt = new THREE.Vector3();
+  private personSel = 0; // the tapped person's house number
+  private personPopup: HTMLElement | null = null;
+  private personEmitAt = 0;
+
   constructor(host: HTMLElement, opts: LandEngineOptions) {
     this.host = host;
     this.opts = opts;
@@ -438,6 +482,16 @@ export class LandEngine {
     this.boards = new NameBoards(coarse ? 18 : 36, FONT);
     this.scene.add(this.boards.group);
 
+    this.people = new People({
+      scene: this.scene,
+      labels: this.labels,
+      font: FONT,
+      lowPower: coarse,
+      fetchFeed: opts.loadFeed ?? (async () => null),
+      link: opts.live ?? null,
+      onNear: opts.onNear,
+    });
+
     // Controls: drag to pan, right-drag / two fingers to rotate, wheel / pinch to zoom.
     this.controls = new MapControls(this.camera, canvas);
     this.controls.enableDamping = true;
@@ -454,6 +508,9 @@ export class LandEngine {
     canvas.addEventListener("pointermove", this.onPointerMove);
     canvas.addEventListener("pointerup", this.onPointerUp);
     canvas.addEventListener("pointerleave", this.onPointerLeave);
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("blur", this.onBlur);
 
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(host);
@@ -477,6 +534,7 @@ export class LandEngine {
     const justJoined = !first && view.me !== null && this.me === null;
     this.view = view;
     this.me = view.me;
+    this.people.setOwner(this.me?.plot ?? null, this.inGame && this.me !== null);
     this.towns.set(view.town, houseMap(view.plots));
     if (view.me) setChosenPlot(null);
     if (first || justJoined) this.active = view.town;
@@ -515,6 +573,10 @@ export class LandEngine {
   select(plot: number | null) {
     const hit = plot ? (this.boxes.find((b) => b.hit.n === plot)?.hit ?? null) : null;
     if (hit === this.selected) return;
+    if (hit && this.personSel) {
+      this.personSel = 0;
+      this.emitPerson();
+    }
     this.selected = hit;
     this.selectedPlot = hit?.n ?? 0;
     this.nudgedPlot = 0;
@@ -561,6 +623,238 @@ export class LandEngine {
     this.opts.onSelect?.(h ? { house: { ...h.house }, town: h.lot.town, mine: this.me?.plot === h.n } : null);
   }
 
+  // ---------- people and play mode ----------
+
+  // You're in the game (or not): your person stops living on their own and follows you.
+  setInGame(on: boolean) {
+    this.inGame = on && this.me !== null;
+    this.people.setOwner(this.me?.plot ?? null, this.inGame);
+    if (!this.inGame && this.playing) this.setPlay(false);
+  }
+
+  // The server's clock, from a game call (keeps everyone's people in step).
+  syncClock(serverNow: number, rttMs: number) {
+    this.people.syncClock(serverNow, rttMs);
+  }
+
+  serverNow() {
+    return this.people.now();
+  }
+
+  // Play mode: the camera goes behind your person; arrows / WASD (or the stick) walk them.
+  async setPlay(on: boolean) {
+    if (on === this.playing || (on && this.playStarting)) return;
+    if (!on) {
+      this.playWanted = false;
+      this.playing = false;
+      this.keys.clear();
+      this.stick = { x: 0, y: 0, run: false };
+      this.mapControls();
+      this.opts.onPlay?.(false);
+      this.wake();
+      return;
+    }
+    if (!this.me || !this.inGame) return;
+    this.select(null);
+    this.selectPerson(null);
+    this.playWanted = true;
+    this.playStarting = true;
+    await this.activate(townOf(this.me.plot));
+    this.playStarting = false;
+    if (this.disposed || !this.playWanted) return;
+    if (!this.people.hasPlayer()) return; // tried again once your person has appeared (frame loop)
+    this.playWanted = false;
+    this.playing = true;
+    this.playControls();
+    const p = this.people.playerPos(this.playerAt);
+    if (p) {
+      // At home: look from the street, so you see your person with the house behind them.
+      // Anywhere else: from behind them.
+      const lot = lotForPlot(this.me.plot);
+      const home = Math.hypot(p.x - lot.x, p.z - lot.z) < 14;
+      const theta = home ? lot.rot + 0.55 : this.people.playerFacing() + Math.PI;
+      this.flyTo({ target: p.clone().setY(p.y + 1.4), radius: this.compact ? 10 : 11.5, phi: 1.1, theta }, 1100);
+    }
+    this.opts.onPlay?.(true);
+  }
+
+  // The on-screen stick (phones): x right, y forward, each -1..1.
+  setStick(x: number, y: number) {
+    this.stick.x = clamp(x, -1, 1);
+    this.stick.y = clamp(y, -1, 1);
+  }
+
+  setRun(on: boolean) {
+    this.running = on;
+  }
+
+  // Your person waves, or acts out a fight / theft the database has decided (ev).
+  playAct(kind: "fight" | "steal" | "wave", ev: GameEvent | null) {
+    this.people.playAct(kind, ev);
+  }
+
+  // Open (or close) the card of a person in the town drawn in detail.
+  selectPerson(plot: number | null) {
+    const next = plot ?? 0;
+    if (next === this.personSel) return;
+    this.personSel = next;
+    if (next) this.select(null);
+    this.emitPerson();
+  }
+
+  setPersonPopup(el: HTMLElement | null) {
+    this.personPopup = el;
+  }
+
+  private emitPerson() {
+    this.personEmitAt = performance.now();
+    this.opts.onSelectPerson?.(this.personSel ? this.people.info(this.personSel) : null);
+  }
+
+  private mapControls() {
+    const c = this.controls;
+    c.enablePan = true;
+    c.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    c.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+    c.minDistance = 22;
+    c.minPolarAngle = 0.12;
+    c.maxPolarAngle = 1.22;
+    c.zoomToCursor = true;
+    if (this.maxTown) c.maxDistance = this.worldView().radius * 1.3;
+  }
+
+  private playControls() {
+    const c = this.controls;
+    c.enablePan = false;
+    c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    c.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
+    c.minDistance = 4;
+    c.maxDistance = 70;
+    c.minPolarAngle = 0.3;
+    c.maxPolarAngle = 1.48;
+    c.zoomToCursor = false;
+  }
+
+  private typing(e: KeyboardEvent) {
+    const el = e.target as HTMLElement | null;
+    return Boolean(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)));
+  }
+
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (!this.playing || this.typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight") this.running = true;
+    if (KEYS[e.code]) {
+      this.keys.add(e.code);
+      e.preventDefault();
+    }
+  };
+
+  private onKeyUp = (e: KeyboardEvent) => {
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight") this.running = false;
+    this.keys.delete(e.code);
+  };
+
+  private onBlur = () => {
+    this.keys.clear();
+    this.running = false;
+  };
+
+  // Which way to walk, in the world: keys and stick, turned to the camera's heading.
+  private moveDir(): { x: number; z: number } | null {
+    let fx = this.stick.y;
+    let rx = this.stick.x;
+    for (const k of this.keys) {
+      const [r, f] = KEYS[k] ?? [0, 0];
+      rx += r;
+      fx += f;
+    }
+    const len = Math.hypot(rx, fx);
+    if (len < 0.08) return null;
+    if (len > 1) {
+      rx /= len;
+      fx /= len;
+    }
+    const fwd = this.tmp.copy(this.controls.target).sub(this.camera.position).setY(0);
+    if (fwd.lengthSq() < 1e-6) return null;
+    fwd.normalize();
+    // Right of the camera's heading is (-fwd.z, fwd.x).
+    return { x: fwd.x * fx - fwd.z * rx, z: fwd.z * fx + fwd.x * rx };
+  }
+
+  // Your person moves; the camera comes along, keeping its angle.
+  private followPlayer(dt: number) {
+    const dir = this.playing && !this.flight ? this.moveDir() : null;
+    this.people.stepPlayer(dt, dir, this.running || this.stick.run, this.stepDelta);
+    if (!this.playing || this.flight) return;
+    const p = this.people.playerPos(this.playerAt);
+    if (!p) return;
+    const want = this.tmp.copy(p).setY(p.y + 1.4).sub(this.controls.target);
+    if (want.lengthSq() < 1e-8) return;
+    this.controls.target.add(want);
+    this.camera.position.add(want);
+    this.idle = 0;
+  }
+
+  // Play mode: if a house or a tall thing is between the camera and your person, draw this frame
+  // from just in front of it. The camera goes back afterwards, so your zoom isn't lost.
+  private unblockCamera() {
+    const t = this.controls.target;
+    const cam = this.camera.position;
+    const dir = this.camDir.copy(cam).sub(t);
+    const len = dir.length();
+    if (len < 2) return false;
+    dir.divideScalar(len);
+    this.camRay.set(t, dir);
+    const b = this.camBox;
+    const p = this.camHit;
+    let best = len;
+    const test = (x: number, z: number, hx: number, hz: number, top: number) => {
+      if (Math.abs(x - t.x) > len + hx + 2 || Math.abs(z - t.z) > len + hz + 2) return;
+      b.min.set(x - hx, 0, z - hz);
+      b.max.set(x + hx, top, z + hz);
+      if (b.containsPoint(t)) return;
+      if (this.camRay.intersectBox(b, p)) best = Math.min(best, p.distanceTo(t));
+    };
+    for (const { hit } of this.boxes) test(hit.lot.x, hit.lot.z, hit.spec.w / 2 + 0.25, hit.spec.d / 2 + 0.25, hit.top + 0.2);
+    for (const o of tallThings(this.active)) test(o.x, o.z, o.hx, o.hz, o.top);
+    if (best >= len - 0.05) return false;
+    this.camSaved.copy(cam);
+    cam.copy(t).addScaledVector(dir, Math.max(1.6, best - 0.4));
+    this.camera.updateMatrixWorld();
+    return true;
+  }
+
+  private camDir = new THREE.Vector3();
+  private camRay = new THREE.Ray();
+  private camBox = new THREE.Box3();
+  private camHit = new THREE.Vector3();
+  private camSaved = new THREE.Vector3();
+
+  private placePersonPopup(d: number) {
+    const el = this.personPopup;
+    if (!el) return;
+    const hide = () => {
+      if (el.style.visibility !== "hidden") el.style.visibility = "hidden";
+    };
+    if (!this.personSel || d > LABEL_D) return hide();
+    const a = this.people.anchor(this.personSel, this.tmp);
+    if (!a) return hide();
+    const v = a.project(this.camera);
+    if (v.z > 1 || v.z < -1) return hide();
+    const px = ((v.x + 1) / 2) * this.width;
+    const py = ((1 - v.y) / 2) * this.height;
+    if (px < -40 || px > this.width + 40 || py < -40 || py > this.height + 40) return hide();
+    const w = el.offsetWidth;
+    const ht = el.offsetHeight;
+    const minX = 8 + (this.insetGoal > 0.5 ? this.insetGoal : 0);
+    const left = clamp(px - w / 2, minX, Math.max(minX, this.width - w - 8));
+    const top = clamp(py - ht - 14, 56, Math.max(56, this.height - ht - 64));
+    el.style.visibility = "visible";
+    el.style.transform = `translate3d(${left.toFixed(1)}px, ${top.toFixed(1)}px, 0)`;
+    el.style.setProperty("--arrow-x", `${clamp(px - left, 18, w - 18).toFixed(1)}px`);
+    el.dataset.arrow = Math.abs(top - (py - ht - 14)) < 2 ? "down" : "none";
+  }
+
   // Fly to your house, or to the next free plot if you don't have one yet.
   async flyToFocus() {
     this.select(null);
@@ -591,6 +885,10 @@ export class LandEngine {
     cancelAnimationFrame(this.raf);
     this.ro.disconnect();
     this.io.disconnect();
+    window.removeEventListener("keydown", this.onKeyDown);
+    window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("blur", this.onBlur);
+    this.people.dispose();
     const canvas = this.renderer.domElement;
     canvas.removeEventListener("pointerdown", this.onPointerDown, { capture: true });
     canvas.removeEventListener("wheel", this.cancelFlight, { capture: true });
@@ -617,6 +915,7 @@ export class LandEngine {
     this.labels.remove();
     this.boards.dispose();
     this.popup = null;
+    this.personPopup = null;
   }
 
   // ---------- data -> scene ----------
@@ -672,7 +971,7 @@ export class LandEngine {
       this.ext = extentOf(maxTown);
       this.rebuildCountry();
       this.rebuildTownTags();
-      this.controls.maxDistance = this.worldView().radius * 1.3;
+      if (!this.playing) this.controls.maxDistance = this.worldView().radius * 1.3;
     }
     this.rebuildFar();
     this.updateTownTags();
@@ -769,6 +1068,8 @@ export class LandEngine {
     this.boxes = built.houses.map((hit) => ({ hit, box: new THREE.Box3(hit.min, hit.max) }));
     this.hovered = null;
     this.boards.invalidate();
+    this.people.setTown(this.active, plots);
+    if (this.personSel && !this.people.info(this.personSel)) this.selectPerson(null);
     // Keep the tapped house's card open if it's still in this town.
     const sel = this.selectedPlot ? (this.boxes.find((b) => b.hit.n === this.selectedPlot)?.hit ?? null) : null;
     const changed = sel !== this.selected;
@@ -1103,8 +1404,11 @@ export class LandEngine {
         }
       }
     }
+    this.pickDist = Math.sqrt(bestD);
     return best;
   }
+
+  private pickDist = Infinity; // how far along the ray the last picked house was
 
   // The town under a screen point (0 if none).
   private pickTown(clientX: number, clientY: number) {
@@ -1126,10 +1430,12 @@ export class LandEngine {
     if (e.pointerType !== "mouse" || e.buttons !== 0) return;
     this.hovered = this.pick(e.clientX, e.clientY);
     const far = this.camera.position.distanceTo(this.controls.target) > LABEL_D;
-    const lot = !this.hovered && !far ? this.freeLotAt(e.clientX, e.clientY) : null;
+    const person = far ? null : this.people.pick(this.ray.ray);
+    if (person && person.dist <= this.pickDist + 0.5) this.hovered = null;
+    const lot = !this.hovered && !person && !far ? this.freeLotAt(e.clientX, e.clientY) : null;
     this.markLot(lot && lot.plot !== this.focus?.n ? lot : null);
     this.renderer.domElement.style.cursor =
-      this.hovered || lot || (far && this.pickTown(e.clientX, e.clientY)) ? "pointer" : "";
+      this.hovered || person || lot || (far && this.pickTown(e.clientX, e.clientY)) ? "pointer" : "";
   };
 
   private onPointerUp = (e: PointerEvent) => {
@@ -1140,8 +1446,15 @@ export class LandEngine {
     if (moved >= 6 || performance.now() - d.t >= 450) return;
     this.wake();
     const far = this.camera.position.distanceTo(this.controls.target) > LABEL_D;
-    // A tap on a house opens its card; a tap anywhere else closes it.
+    // A tap on a person or a house opens their card (the nearer one wins); anywhere else closes it.
     const hit = far ? null : this.pick(e.clientX, e.clientY);
+    const person = far ? null : this.people.pick(this.ray.ray);
+    if (person && (!hit || person.dist <= this.pickDist + 0.5)) {
+      this.select(null);
+      this.selectPerson(person.plot);
+      return;
+    }
+    this.selectPerson(null);
     this.select(hit?.n ?? null);
     if (hit) return;
     if (far) {
@@ -1204,7 +1517,7 @@ export class LandEngine {
     // The first measurement applies at once; later changes ease in from the frame loop.
     if (this.inset < 0) this.inset = this.insetGoal;
     this.applyInset();
-    if (this.maxTown) this.controls.maxDistance = this.worldView().radius * 1.3;
+    if (this.maxTown && !this.playing) this.controls.maxDistance = this.worldView().radius * 1.3;
   }
 
   // Shift the image right by half the covered strip so the focus sits centred in the open area.
@@ -1302,6 +1615,12 @@ export class LandEngine {
       return;
     }
     this.raf = requestAnimationFrame(this.loop);
+    const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 1 / 60;
+    this.lastFrame = now;
+
+    // Your person walks (and the camera follows) before the controls settle the view.
+    if (this.playWanted && !this.playing && !this.playStarting && this.people.hasPlayer()) void this.setPlay(true);
+    this.followPlayer(dt);
 
     if (Math.abs(this.insetGoal - this.inset) > 0.5) {
       this.inset = this.reduced ? this.insetGoal : this.inset + (this.insetGoal - this.inset) * 0.14;
@@ -1395,6 +1714,7 @@ export class LandEngine {
     }
 
     const secs = now / 1000;
+    const moved = this.playing && !this.flight ? this.unblockCamera() : false;
 
     // Your house goes up from the ground, layer by layer; the crane keeps working.
     const own = this.built?.own;
@@ -1444,6 +1764,13 @@ export class LandEngine {
     // The tapped house's card, kept above the house and inside the free part of the screen.
     this.placePopup(d);
 
+    // The people: everyone's pose for this moment, their tags, and the tapped person's card.
+    const pdt = this.peopleAt ? Math.min(0.1, (now - this.peopleAt) / 1000) : 1 / 60;
+    this.peopleAt = now;
+    this.people.update(pdt, this.camera, target, d, this.width, this.height, this.compact);
+    this.placePersonPopup(d);
+    if (this.personSel && now - this.personEmitAt > 1000) this.emitPerson();
+
     // Message bubbles over neighbours' houses.
     for (const [plot, b] of this.bubbles) {
       const hit = this.boxes.find((x) => x.hit.n === plot)?.hit;
@@ -1470,6 +1797,10 @@ export class LandEngine {
     }
 
     this.renderer.render(this.scene, this.camera);
+    if (moved) {
+      this.camera.position.copy(this.camSaved);
+      this.camera.updateMatrixWorld();
+    }
   };
 
   private makeSignBoard(group: THREE.Group, mat: THREE.MeshLambertMaterial) {

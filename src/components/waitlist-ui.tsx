@@ -2,6 +2,7 @@ import { signOut } from "@/app/actions";
 import { GoogleButton } from "@/components/google-button";
 import { CheckIcon, HouseGlyph, PaintRollerIcon } from "@/components/icons";
 import { InstagramForm } from "@/components/instagram-form";
+import { MyPerson } from "@/components/game/my-person";
 import { InviteNote } from "@/components/invite-note";
 import { Land } from "@/components/land/land";
 import { neighboursOf } from "@/components/land/spec";
@@ -29,7 +30,10 @@ export function Shell({ step, signedIn, view, startAt = null, children }: ShellP
     : `${site.headline.replace(/\.$/, "")} · #${fmt(next)} is next`;
 
   const header = (
-    <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between p-3 md:p-6">
+    <header
+      id="site-header"
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between p-3 md:p-6 phone-land:py-2 phone-land:pl-[max(0.75rem,env(safe-area-inset-left))] phone-land:pr-[max(0.75rem,env(safe-area-inset-right))]"
+    >
       <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-white/90 py-1.5 pl-1.5 pr-4 shadow-[0_6px_20px_-10px_rgba(0,0,0,0.45)] backdrop-blur">
         <span className="grid size-7 place-items-center rounded-full bg-accent text-white">
           <HouseGlyph className="size-4" />
@@ -50,11 +54,17 @@ export function Shell({ step, signedIn, view, startAt = null, children }: ShellP
   );
 
   return (
-    <ShellFrame map={<Land view={view} signedIn={signedIn} startAt={startAt} />} header={header} top={<Counter view={view} />} summary={summary}>
-      <h1 className="mt-4 text-3xl font-semibold leading-[0.98] tracking-tighter text-zinc-950 md:text-[2.5rem]">
+    <ShellFrame
+      map={<Land view={view} signedIn={signedIn} startAt={startAt} />}
+      header={header}
+      top={<Counter view={view} />}
+      summary={summary}
+      foldOnPhones={view.me !== null}
+    >
+      <h1 className="mt-4 text-3xl font-semibold leading-[0.98] tracking-tighter text-zinc-950 md:text-[2.5rem] phone-land:mt-3 phone-land:text-2xl">
         {site.headline}
       </h1>
-      <p className="mt-3 text-[15px] leading-relaxed text-zinc-600">{site.description}</p>
+      <p className="mt-3 text-[15px] leading-relaxed text-zinc-600 phone-land:text-sm">{site.description}</p>
 
       <Steps current={step} />
 
@@ -168,6 +178,7 @@ export function OnListPanel({ me, email, houses }: { me: MyHouse; email: string 
         {done ? "Your house is finished" : "Your house is being built"} on plot {fmt(plotInTown(me.plot))} of {fmt(TOWN_SIZE)}{" "}
         in {town}. It&apos;s the one with the yellow pin and your name on the big sign.
       </p>
+      <MyPerson />
       <MyHouseStatus me={me} neighbours={neighbours} />
       <div className="flex items-center gap-3 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white text-zinc-700 shadow-[0_2px_6px_-3px_rgba(0,0,0,0.25)]">

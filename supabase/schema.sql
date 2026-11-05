@@ -268,6 +268,121 @@ create table if not exists public.house_blocks (
 alter table public.house_blocks enable row level security;
 revoke all on table public.house_blocks from anon, authenticated;
 
+-- 7b. Characters: every house comes with the person who lives in it (section 11 has what they do).
+--     A person's look is one of 2,548,039,680 combinations of body, skin, hair, face, clothes and
+--     shoes (src/components/people/look.ts turns the number into the person). char_look() maps house
+--     numbers onto those combinations one to one, and `look` is unique, so no two people look the
+--     same. Age and personality (trait) also come from the house number.
+--     Jobs come later: until then job is null and income is 0. Everyone starts with 500 coins
+--     (in-game, not money) in their pocket, which is what gets stolen.
+create or replace function public.char_look(p_plot integer)
+returns bigint
+language sql
+immutable
+set search_path = ''
+as $$
+  -- 1234567891 shares no factor with 2548039680 (= 2^21 x 3^5 x 5), so no two house numbers
+  -- below 2,548,039,681 get the same look.
+  select (1234567891::bigint * p_plot + 987654321) % 2548039680;
+$$;
+
+create or replace function public.char_trait(p_plot integer)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select (array['hardworking', 'hothead', 'sneaky', 'friendly', 'lazy', 'curious'])[
+    ((p_plot::bigint * 2654435761) % 4294967296) % 6 + 1
+  ];
+$$;
+
+-- Grey or white hair (look digit 4, see look.ts) means an older person.
+create or replace function public.char_age(p_plot integer)
+returns smallint
+language sql
+immutable
+set search_path = ''
+as $$
+  select (case
+    when (public.char_look(p_plot) / 160) % 8 >= 6 then 56 + ((p_plot::bigint * 2246822519) % 4294967296) % 22
+    else 19 + ((p_plot::bigint * 2246822519) % 4294967296) % 30
+  end)::smallint;
+$$;
+
+create table if not exists public.characters (
+  plot integer primary key references public.waitlist (plot) on delete cascade,
+  town integer generated always as ((plot - 1) / 1000 + 1) stored,
+  look bigint not null,
+  age smallint not null,
+  trait text not null,
+  job text, -- null: waiting for a job
+  income integer not null default 0, -- coins a day
+  wallet integer not null default 500,
+  health smallint not null default 100, -- as of health_at; it heals 10 an hour (char_hp)
+  health_at timestamptz not null default now(),
+  last_seen timestamptz, -- the owner was last in the game (they're "online" for 75 s after)
+  next_at timestamptz not null default now() + interval '6 minutes', -- when they next do something on their own
+  created_at timestamptz not null default now(),
+  constraint characters_look_unique unique (look),
+  constraint characters_wallet_ok check (wallet >= 0),
+  constraint characters_health_ok check (health between 0 and 100),
+  constraint characters_trait_ok check (trait in ('hardworking', 'hothead', 'sneaky', 'friendly', 'lazy', 'curious'))
+);
+
+create index if not exists characters_town_next_idx on public.characters (town, next_at);
+
+alter table public.characters enable row level security;
+revoke all on table public.characters from anon, authenticated;
+
+-- Everyone on the list gets their person (people who joined before characters existed, too).
+insert into public.characters (plot, look, age, trait, next_at)
+select w.plot, public.char_look(w.plot), public.char_age(w.plot), public.char_trait(w.plot),
+  now() + interval '5 minutes' + random() * interval '25 minutes'
+from public.waitlist w
+on conflict (plot) do nothing;
+
+create or replace function public.waitlist_add_character()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.characters (plot, look, age, trait)
+  values (new.plot, public.char_look(new.plot), public.char_age(new.plot), public.char_trait(new.plot))
+  on conflict (plot) do nothing;
+  return null;
+end;
+$$;
+
+revoke execute on function public.waitlist_add_character() from public, anon, authenticated;
+
+drop trigger if exists waitlist_add_character on public.waitlist;
+create trigger waitlist_add_character
+  after insert on public.waitlist
+  for each row execute function public.waitlist_add_character();
+
+-- Health now: what it was at health_at, plus 10 an hour, up to 100.
+create or replace function public.char_hp(p_health smallint, p_at timestamptz)
+returns integer
+language sql
+stable
+set search_path = ''
+as $$
+  select least(100, p_health + greatest(0, floor(extract(epoch from now() - p_at) / 360))::integer);
+$$;
+
+-- The owner is in the game: they pinged in the last 75 seconds.
+create or replace function public.char_online(p_seen timestamptz)
+returns boolean
+language sql
+stable
+set search_path = ''
+as $$
+  select coalesce(p_seen > now() - interval '75 seconds', false);
+$$;
+
 -- 8. What the map needs, in one call. Everyone, signed in or not, can call it.
 --    It returns ONLY Instagram usernames, house numbers and build times; Google names and emails
 --    stay private.
@@ -275,9 +390,11 @@ revoke all on table public.house_blocks from anon, authenticated;
 --    - last:   the highest house number given out
 --    - next / open: see section 3
 --    - towns:  [town, houses] for every town that has houses
---    - town + plots: one town's houses as [house number, username, started, done, waves]
---      (started / done are Unix times in seconds; at most 1,000 rows). p_town picks the town;
---      without it you get the caller's own town, or else the town where the next house goes.
+--    - town + plots: one town's houses as [house number, username, started, done, waves, look,
+--      age, trait, job, income, online] (started / done are Unix times in seconds; look, age,
+--      trait, job and income describe the person living there, see section 7b; online: their
+--      owner is in the game right now; at most 1,000 rows). p_town picks the town; without it you
+--      get the caller's own town, or else the town where the next house goes.
 --    - me: the caller's own house, with its build times, invites and unread messages
 --      (null when signed out or not on the list yet)
 create or replace function public.waitlist_world(p_town integer default null)
@@ -323,8 +440,16 @@ as $$
       floor(extract(epoch from w.created_at + make_interval(days => public.waitlist_build_days(
         (select count(*)::int from public.waitlist x where x.invited_by = w.plot)
       ))))::bigint as done,
-      (select count(*)::int from public.house_waves v where v.to_plot = w.plot) as waves
-    from public.waitlist w, pick p
+      (select count(*)::int from public.house_waves v where v.to_plot = w.plot) as waves,
+      coalesce(c.look, public.char_look(w.plot)) as look,
+      coalesce(c.age, public.char_age(w.plot)) as age,
+      coalesce(c.trait, public.char_trait(w.plot)) as trait,
+      c.job,
+      coalesce(c.income, 0) as income,
+      public.char_online(c.last_seen) as online
+    from public.waitlist w
+    cross join pick p
+    left join public.characters c on c.plot = w.plot
     where w.plot between (p.town - 1) * 1000 + 1 and p.town * 1000
   )
   select json_build_object(
@@ -342,7 +467,9 @@ as $$
     ), '[]'::json),
     'town', p.town,
     'plots', coalesce((
-      select json_agg(json_build_array(h.plot, h.username, h.start, h.done, h.waves) order by h.plot)
+      select json_agg(json_build_array(
+        h.plot, h.username, h.start, h.done, h.waves, h.look, h.age, h.trait, h.job, h.income, h.online
+      ) order by h.plot)
       from town_houses h
     ), '[]'::json),
     'me', (select row_to_json(m) from me m)
@@ -581,6 +708,574 @@ begin
   end if;
 end;
 $$;
+
+-- 11. Life in town. While their owner is away, people live on their own: chores, waiting at the
+--     Job Centre, a jog, a nap, chatting with a neighbour, and now and then a fight or a theft.
+--     Everything that happens is a row in public.character_events, which is both what the map acts
+--     out (section 12, town_events) and what the owner reads when they come back (game_enter).
+--     Owners in the game control their person themselves; nothing happens to them on its own.
+--     There's no scheduler: a town is brought up to date (advance_town) whenever someone is
+--     looking at it or playing in it. Things are decided 5-10 minutes before they happen, so every
+--     screen can show them on time. A town nobody looked at catches up on the last 12 hours.
+create table if not exists public.character_events (
+  id bigint generated always as identity primary key,
+  town integer not null,
+  at timestamptz not null, -- when it starts at its spot (the walk there comes before)
+  dur smallint not null, -- seconds it lasts
+  kind text not null,
+  detail text not null default '', -- task: which one; steal: ok / caught / empty
+  actor integer not null references public.waitlist (plot) on delete cascade,
+  target integer references public.waitlist (plot) on delete cascade,
+  winner integer, -- fights
+  coins integer not null default 0, -- steals: target -> actor; fights: loser -> winner
+  hp_actor smallint not null default 0, -- health lost in a fight
+  hp_target smallint not null default 0,
+  live boolean not null default false, -- done by a player in the game
+  created_at timestamptz not null default now(),
+  constraint character_events_kind check (kind in ('task', 'chat', 'fight', 'steal'))
+);
+
+create index if not exists character_events_town_at_idx on public.character_events (town, at);
+create index if not exists character_events_actor_at_idx on public.character_events (actor, at);
+create index if not exists character_events_target_at_idx on public.character_events (target, at);
+
+alter table public.character_events enable row level security;
+revoke all on table public.character_events from anon, authenticated;
+
+-- A chore, by personality. Hurt people rest.
+create or replace function public.char_pick_task(p_trait text, p_hp integer)
+returns text
+language plpgsql
+volatile
+set search_path = ''
+as $$
+declare
+  r double precision := random();
+begin
+  if p_hp < 35 then
+    return 'rest';
+  end if;
+  if p_trait = 'lazy' then
+    return case when r < 0.3 then 'rest' when r < 0.5 then 'park' when r < 0.7 then 'jobqueue'
+      when r < 0.8 then 'mailbox' when r < 0.9 then 'build' else 'sweep' end;
+  elsif p_trait = 'hardworking' then
+    return case when r < 0.3 then 'jobqueue' when r < 0.48 then 'sweep' when r < 0.64 then 'water'
+      when r < 0.78 then 'jog' when r < 0.88 then 'build' when r < 0.95 then 'mailbox' else 'park' end;
+  end if;
+  return case when r < 0.26 then 'jobqueue' when r < 0.38 then 'sweep' when r < 0.5 then 'water'
+    when r < 0.6 then 'jog' when r < 0.72 then 'park' when r < 0.82 then 'build' when r < 0.9 then 'mailbox'
+    else 'rest' end;
+end;
+$$;
+
+-- Someone (p_plot) does one thing on their own at p_at. Returns when they can next act.
+-- A person is in at most one thing at a time: nothing else involving them 25 minutes either side.
+create or replace function public.char_auto_event(p_plot integer, p_at timestamptz)
+returns timestamptz
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  c public.characters;
+  t public.characters;
+  busy public.character_events;
+  r double precision := random();
+  w_chat double precision;
+  w_fight double precision;
+  w_steal double precision;
+  v_kind text := 'task';
+  v_detail text := '';
+  v_dur integer;
+  hp integer;
+  thp integer;
+  v_coins integer := 0;
+  v_winner integer;
+  dmg_a integer := 0;
+  dmg_t integer := 0;
+  loser integer;
+  gap_min double precision;
+begin
+  select * into c from public.characters x where x.plot = p_plot;
+  if not found then
+    return p_at + interval '1 hour';
+  end if;
+
+  -- Already in something around then (a neighbour came over): try again after it.
+  select * into busy from public.character_events e
+  where (e.actor = p_plot or e.target = p_plot)
+    and e.at > p_at - interval '25 minutes' and e.at < p_at + interval '25 minutes'
+  order by e.at desc
+  limit 1;
+  if found then
+    return busy.at + interval '25 minutes' + random() * interval '5 minutes';
+  end if;
+
+  hp := public.char_hp(c.health, c.health_at);
+  w_chat := case c.trait when 'friendly' then 0.32 when 'curious' then 0.24 when 'lazy' then 0.12 else 0.16 end;
+  w_fight := case c.trait when 'hothead' then 0.2 when 'friendly' then 0.02 when 'hardworking' then 0.03 else 0.06 end;
+  w_steal := case c.trait when 'sneaky' then 0.26 when 'friendly' then 0.03 when 'hardworking' then 0.04
+    when 'curious' then 0.09 else 0.07 end;
+  if hp < 30 then
+    w_fight := 0;
+    w_steal := w_steal / 2;
+  end if;
+
+  if r < w_chat + w_fight + w_steal then
+    v_kind := case when r < w_chat then 'chat' when r < w_chat + w_fight then 'fight' else 'steal' end;
+    -- A neighbour who's around: not in the game themselves and not busy then.
+    select * into t from public.characters x
+    where x.town = c.town and x.plot <> c.plot
+      and not public.char_online(x.last_seen)
+      and public.plots_near(c.plot, x.plot)
+      and not exists (
+        select 1 from public.character_events e
+        where (e.actor = x.plot or e.target = x.plot)
+          and e.at > p_at - interval '25 minutes' and e.at < p_at + interval '25 minutes'
+      )
+    order by random()
+    limit 1;
+    if not found then
+      v_kind := 'task';
+    end if;
+  end if;
+
+  if v_kind = 'task' then
+    v_detail := public.char_pick_task(c.trait, hp);
+    v_dur := case v_detail when 'sweep' then 150 when 'water' then 120 when 'mailbox' then 45 when 'jog' then 240
+      when 'park' then 300 when 'build' then 120 when 'rest' then 480 else 360 end;
+    if v_detail = 'rest' then
+      update public.characters x set health = least(100, hp + 25), health_at = now() where x.plot = c.plot;
+    end if;
+  elsif v_kind = 'chat' then
+    v_dur := 90;
+  elsif v_kind = 'fight' then
+    v_dur := 30;
+    thp := public.char_hp(t.health, t.health_at);
+    v_winner := case when random() < 0.5 + (hp - thp) / 250.0 + (case c.trait when 'hothead' then 0.06 else 0 end)
+      then c.plot else t.plot end;
+    loser := case when v_winner = c.plot then t.plot else c.plot end;
+    dmg_a := case when v_winner = c.plot then 2 + floor(random() * 7)::int else 10 + floor(random() * 13)::int end;
+    dmg_t := case when v_winner = t.plot then 2 + floor(random() * 7)::int else 10 + floor(random() * 13)::int end;
+    v_coins := least(case when loser = c.plot then c.wallet else t.wallet end, floor(random() * 11)::int);
+    -- One statement for both, so the two rows are always locked in the same order.
+    update public.characters x set
+      health = greatest(0, public.char_hp(x.health, x.health_at) - case when x.plot = c.plot then dmg_a else dmg_t end),
+      health_at = now(),
+      wallet = x.wallet + case when x.plot = v_winner then v_coins else -v_coins end
+    where x.plot in (c.plot, t.plot);
+  else
+    v_dur := 35;
+    if t.wallet <= 0 then
+      v_detail := 'empty';
+    elsif random() < (case c.trait when 'sneaky' then 0.75 else 0.6 end) then
+      v_detail := 'ok';
+      v_coins := least(t.wallet, 5 + floor(random() * 36)::int);
+      update public.characters x set wallet = x.wallet + case when x.plot = c.plot then v_coins else -v_coins end
+      where x.plot in (c.plot, t.plot);
+    else
+      v_detail := 'caught';
+    end if;
+  end if;
+
+  insert into public.character_events (town, at, dur, kind, detail, actor, target, winner, coins, hp_actor, hp_target)
+  values (c.town, p_at, v_dur, v_kind, v_detail, c.plot, t.plot, v_winner, v_coins, dmg_a, dmg_t);
+
+  gap_min := case c.trait when 'lazy' then 30 when 'hardworking' then 26 else 28 end + random() * 20;
+  return p_at + make_interval(secs => v_dur + gap_min * 60);
+end;
+$$;
+
+-- Bring a town up to date: everyone whose owner is away and who's due does their next thing.
+-- Cheap when nothing is due. At most 200 people and 10 things each per call; the next call goes on.
+create or replace function public.advance_town(p_town integer)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  ch record;
+  t timestamptz;
+  n integer;
+  lead_at timestamptz := now() + interval '5 minutes';
+  horizon timestamptz := now() + interval '10 minutes';
+begin
+  if p_town is null or p_town < 1 or p_town > 1000000 then
+    return;
+  end if;
+  -- One update per town at a time; anyone else asking meanwhile just skips.
+  if not pg_try_advisory_xact_lock(hashtext('public.advance_town'), p_town) then
+    return;
+  end if;
+  for ch in
+    select c.plot, c.next_at from public.characters c
+    where c.town = p_town and c.next_at <= horizon and not public.char_online(c.last_seen)
+    order by c.next_at
+    limit 200
+  loop
+    t := greatest(ch.next_at, now() - interval '12 hours' + random() * interval '30 minutes');
+    n := 0;
+    while t <= horizon and n < 10 loop
+      -- Anything still to come is announced at least 5 minutes ahead.
+      if t > now() and t < lead_at then
+        t := lead_at + random() * interval '3 minutes';
+      end if;
+      t := public.char_auto_event(ch.plot, t);
+      n := n + 1;
+    end loop;
+    update public.characters x set next_at = t where x.plot = ch.plot;
+  end loop;
+  -- Now and then, forget what happened more than 4 days ago.
+  if random() < 0.02 then
+    delete from public.character_events e
+    where e.id in (select x.id from public.character_events x where x.at < now() - interval '4 days' limit 5000);
+  end if;
+end;
+$$;
+
+-- The owner is back: whatever their person was about to do on their own is called off (coins and
+-- health go back), because from now on the owner is in control.
+create or replace function public.char_cancel_future(p_plot integer)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  e public.character_events;
+begin
+  for e in
+    select * from public.character_events x
+    where (x.actor = p_plot or x.target = p_plot) and x.at > now() and not x.live
+    order by x.id
+  loop
+    if e.kind = 'steal' and e.coins > 0 then
+      update public.characters x set wallet = greatest(0, x.wallet + case when x.plot = e.actor then -e.coins else e.coins end)
+      where x.plot in (e.actor, e.target);
+    elsif e.kind = 'fight' then
+      update public.characters x set
+        wallet = greatest(0, x.wallet + case when x.plot = e.winner then -e.coins else e.coins end),
+        health = least(100, x.health + case when x.plot = e.actor then e.hp_actor else e.hp_target end)
+      where x.plot in (e.actor, e.target);
+    end if;
+    delete from public.character_events x where x.id = e.id;
+  end loop;
+end;
+$$;
+
+-- 12. What the game calls.
+
+-- A person as JSON (wallet and health are only sent to their owner).
+create or replace function public.char_json(c public.characters)
+returns json
+language sql
+stable
+set search_path = ''
+as $$
+  select json_build_object(
+    'plot', c.plot, 'look', c.look, 'age', c.age, 'trait', c.trait, 'job', c.job, 'income', c.income,
+    'wallet', c.wallet, 'health', public.char_hp(c.health, c.health_at)
+  );
+$$;
+
+-- What happened to someone, newest first, as [id, at, kind, detail, mine, other, other's username,
+-- won, coins, live]. mine: they did it (rather than it was done to them); won: fights only.
+-- Only things that have already started; p_since / p_after_id / p_before narrow it down.
+create or replace function public.char_story(
+  p_plot integer, p_since timestamptz, p_after_id bigint, p_before timestamptz, p_limit integer
+)
+returns json
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(json_agg(json_build_array(
+    s.id, s.at, s.kind, s.detail, s.mine, s.other, s.other_name, s.won, s.coins, s.live
+  ) order by s.at_ts desc, s.id desc), '[]'::json)
+  from (
+    select e.id, e.at as at_ts, floor(extract(epoch from e.at))::bigint as at, e.kind, e.detail,
+      e.actor = p_plot as mine,
+      case when e.actor = p_plot then e.target else e.actor end as other,
+      w.instagram_username as other_name,
+      case when e.kind = 'fight' then e.winner = p_plot end as won,
+      e.coins, e.live
+    from public.character_events e
+    left join public.waitlist w on w.plot = case when e.actor = p_plot then e.target else e.actor end
+    where (e.actor = p_plot or e.target = p_plot)
+      and e.at <= now()
+      and (p_since is null or e.at > p_since)
+      and (p_after_id is null or e.id > p_after_id)
+      and (p_before is null or e.at < p_before)
+    order by e.at desc, e.id desc
+    limit greatest(1, least(coalesce(p_limit, 40), 60))
+  ) s;
+$$;
+
+-- Coming into the game: the town catches up, your person stops doing things on their own, and you
+-- get what happened since you were last here (first: you've never been in the game).
+create or replace function public.game_enter()
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  me integer := public.my_plot();
+  c public.characters;
+  seen timestamptz;
+begin
+  if me is null then
+    raise exception 'join the waitlist first' using hint = 'game_not_on_list';
+  end if;
+  insert into public.characters (plot, look, age, trait)
+  values (me, public.char_look(me), public.char_age(me), public.char_trait(me))
+  on conflict (plot) do nothing;
+  select * into c from public.characters x where x.plot = me;
+  seen := c.last_seen;
+  if not public.char_online(seen) then
+    perform public.advance_town(c.town);
+  end if;
+  perform public.char_cancel_future(me);
+  -- While you're here, your person does nothing on their own (and catches up on nothing later).
+  update public.characters x set last_seen = now(), next_at = greatest(x.next_at, now() + interval '6 minutes')
+  where x.plot = me
+  returning * into c;
+  return json_build_object(
+    'now', extract(epoch from now()),
+    'char', public.char_json(c),
+    'first', seen is null,
+    'since', floor(extract(epoch from coalesce(seen, c.created_at)))::bigint,
+    -- The first time: the latest of everything so far.
+    'events', public.char_story(me, seen, null, null, 40)
+  );
+end;
+$$;
+
+-- Still here (every 30 s while the game is open): keeps you in control and your town going, and
+-- returns anything new that happened to you (after event p_after).
+create or replace function public.game_ping(p_after bigint default null)
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  me integer := public.my_plot();
+  c public.characters;
+begin
+  if me is null then
+    raise exception 'join the waitlist first' using hint = 'game_not_on_list';
+  end if;
+  update public.characters x set last_seen = now(), next_at = greatest(x.next_at, now() + interval '6 minutes')
+  where x.plot = me
+  returning * into c;
+  if not found then
+    return public.game_enter();
+  end if;
+  perform public.advance_town(c.town);
+  return json_build_object(
+    'now', extract(epoch from now()),
+    'char', public.char_json(c),
+    'events', public.char_story(me, now() - interval '1 hour', coalesce(p_after, 0), null, 20)
+  );
+end;
+$$;
+
+-- Leaving (closing the page): your person goes back to living on their own straight away.
+create or replace function public.game_leave()
+returns void
+language sql
+volatile
+security definer
+set search_path = ''
+as $$
+  update public.characters x set last_seen = now() - interval '76 seconds',
+    next_at = greatest(x.next_at, now() + interval '5 minutes')
+  where x.plot = public.my_plot() and public.char_online(x.last_seen);
+$$;
+
+-- Older entries of your story (before Unix time p_before, or the latest without it).
+create or replace function public.my_story(p_before bigint default null)
+returns json
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  me integer := public.my_plot();
+begin
+  if me is null then
+    raise exception 'join the waitlist first' using hint = 'game_not_on_list';
+  end if;
+  return public.char_story(me, null, null, case when p_before is null then null else to_timestamp(p_before) end, 40);
+end;
+$$;
+
+-- Fight or steal from someone, as a player (you walked up to them). Same town only; the outcome is
+-- decided here. Limits: a fight every 45 s, a theft every 2 min, the same person once in 6 hours.
+create or replace function public.char_act(p_kind text, p_target integer)
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  me integer := public.my_plot();
+  c public.characters;
+  t public.characters;
+  hp integer;
+  thp integer;
+  v_detail text := '';
+  v_dur integer;
+  v_coins integer := 0;
+  v_winner integer;
+  loser integer;
+  dmg_a integer := 0;
+  dmg_t integer := 0;
+  ev public.character_events;
+begin
+  if me is null then
+    raise exception 'join the waitlist first' using hint = 'game_not_on_list';
+  end if;
+  if p_kind is null or p_kind not in ('fight', 'steal') then
+    raise exception 'unknown action %', p_kind using hint = 'game_bad_action';
+  end if;
+  if p_target is null or p_target = me then
+    raise exception 'nobody to do that to' using hint = 'game_no_target';
+  end if;
+  -- Lock both people in house order (the same order everything else uses).
+  perform 1 from public.characters x where x.plot in (me, p_target) order by x.plot for update;
+  select * into c from public.characters x where x.plot = me;
+  if not found then
+    raise exception 'join the waitlist first' using hint = 'game_not_on_list';
+  end if;
+  select * into t from public.characters x where x.plot = p_target;
+  if not found or t.town <> c.town then
+    raise exception 'house % is not in your town', p_target using hint = 'game_no_target';
+  end if;
+  if exists (
+    select 1 from public.character_events e
+    where e.actor = me and e.live and e.kind = p_kind
+      and e.at > now() - case when p_kind = 'fight' then interval '45 seconds' else interval '2 minutes' end
+  ) then
+    raise exception 'too soon' using hint = case when p_kind = 'fight' then 'game_fight_wait' else 'game_steal_wait' end;
+  end if;
+
+  hp := public.char_hp(c.health, c.health_at);
+  thp := public.char_hp(t.health, t.health_at);
+  if p_kind = 'fight' then
+    if hp < 15 then
+      raise exception 'too hurt' using hint = 'game_too_hurt';
+    end if;
+    v_dur := 6;
+    v_winner := case when random() < 0.5 + (hp - thp) / 250.0 then me else p_target end;
+    loser := case when v_winner = me then p_target else me end;
+    dmg_a := case when v_winner = me then 2 + floor(random() * 7)::int else 10 + floor(random() * 13)::int end;
+    dmg_t := case when v_winner = p_target then 2 + floor(random() * 7)::int else 10 + floor(random() * 13)::int end;
+    v_coins := least(case when loser = me then c.wallet else t.wallet end, floor(random() * 11)::int);
+    update public.characters x set
+      health = greatest(0, public.char_hp(x.health, x.health_at) - case when x.plot = me then dmg_a else dmg_t end),
+      health_at = now(),
+      wallet = x.wallet + case when x.plot = v_winner then v_coins else -v_coins end
+    where x.plot in (me, p_target);
+  else
+    if exists (
+      select 1 from public.character_events e
+      where e.actor = me and e.target = p_target and e.live and e.kind = 'steal' and e.at > now() - interval '6 hours'
+    ) then
+      raise exception 'already robbed them' using hint = 'game_steal_again';
+    end if;
+    v_dur := 4;
+    if t.wallet <= 0 then
+      v_detail := 'empty';
+    elsif random() < (case c.trait when 'sneaky' then 0.7 else 0.55 end) then
+      v_detail := 'ok';
+      v_coins := least(t.wallet, 5 + floor(random() * 36)::int);
+      update public.characters x set wallet = x.wallet + case when x.plot = me then v_coins else -v_coins end
+      where x.plot in (me, p_target);
+    else
+      v_detail := 'caught';
+    end if;
+  end if;
+
+  insert into public.character_events (town, at, dur, kind, detail, actor, target, winner, coins, hp_actor, hp_target, live)
+  values (c.town, now(), v_dur, p_kind, v_detail, me, p_target, v_winner, v_coins, dmg_a, dmg_t, true)
+  returning * into ev;
+  update public.characters x set last_seen = now(), next_at = greatest(x.next_at, now() + interval '6 minutes')
+  where x.plot = me
+  returning * into c;
+  return json_build_object(
+    'id', ev.id, 'kind', ev.kind, 'detail', ev.detail, 'winner', ev.winner, 'coins', ev.coins,
+    'targetName', (select w.instagram_username from public.waitlist w where w.plot = p_target),
+    'char', public.char_json(c)
+  );
+end;
+$$;
+
+-- What's going on in a town, for the map to act out: everything from 20 minutes ago to 20 minutes
+-- ahead as [id, at, dur, kind, detail, actor, target, winner, coins, live], who's in the game
+-- right now, and the server's clock (so every screen shows the same moment). Anyone can call it.
+create or replace function public.town_events(p_town integer)
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  t integer := greatest(1, least(1000000, coalesce(p_town, 1)));
+begin
+  perform public.advance_town(t);
+  return json_build_object(
+    'now', extract(epoch from now()),
+    'events', coalesce((
+      select json_agg(json_build_array(
+        e.id, floor(extract(epoch from e.at))::bigint, e.dur, e.kind, e.detail, e.actor, e.target, e.winner, e.coins, e.live
+      ) order by e.at, e.id)
+      from public.character_events e
+      where e.town = t and e.at > now() - interval '20 minutes' and e.at < now() + interval '20 minutes'
+    ), '[]'::json),
+    'online', coalesce((
+      select json_agg(c.plot order by c.plot)
+      from public.characters c
+      where c.town = t and public.char_online(c.last_seen)
+    ), '[]'::json)
+  );
+end;
+$$;
+
+revoke execute on function public.char_look(integer) from public, anon, authenticated;
+revoke execute on function public.char_trait(integer) from public, anon, authenticated;
+revoke execute on function public.char_age(integer) from public, anon, authenticated;
+revoke execute on function public.char_hp(smallint, timestamptz) from public, anon, authenticated;
+revoke execute on function public.char_online(timestamptz) from public, anon, authenticated;
+revoke execute on function public.char_pick_task(text, integer) from public, anon, authenticated;
+revoke execute on function public.char_auto_event(integer, timestamptz) from public, anon, authenticated;
+revoke execute on function public.advance_town(integer) from public, anon, authenticated;
+revoke execute on function public.char_cancel_future(integer) from public, anon, authenticated;
+revoke execute on function public.char_json(public.characters) from public, anon, authenticated;
+revoke execute on function public.char_story(integer, timestamptz, bigint, timestamptz, integer) from public, anon, authenticated;
+revoke execute on function public.game_enter() from public, anon;
+revoke execute on function public.game_ping(bigint) from public, anon;
+revoke execute on function public.game_leave() from public, anon;
+revoke execute on function public.my_story(bigint) from public, anon;
+revoke execute on function public.char_act(text, integer) from public, anon;
+revoke execute on function public.town_events(integer) from public;
+grant execute on function public.game_enter() to authenticated;
+grant execute on function public.game_ping(bigint) to authenticated;
+grant execute on function public.game_leave() to authenticated;
+grant execute on function public.my_story(bigint) to authenticated;
+grant execute on function public.char_act(text, integer) to authenticated;
+grant execute on function public.town_events(integer) to anon, authenticated;
 
 -- Removed in older versions of this file (the map now reads waitlist_world).
 drop function if exists public.waitlist_position();

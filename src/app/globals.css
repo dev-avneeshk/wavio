@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Phones held sideways: the map takes the whole screen and the card sits at the side, like on a
+   computer, but smaller. */
+@custom-variant phone-land (@media (orientation: landscape) and (max-height: 540px) and (pointer: coarse));
+
 @theme inline {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -12,6 +16,21 @@
 
   --animate-rise: rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-pulse-dot: pulse-dot 2.4s ease-in-out infinite;
+  --animate-turn-phone: turn-phone 2.4s ease-in-out infinite;
+
+  @keyframes turn-phone {
+    0%,
+    20% {
+      transform: rotate(0deg);
+    }
+    50%,
+    80% {
+      transform: rotate(-90deg);
+    }
+    100% {
+      transform: rotate(0deg);
+    }
+  }
 
   @keyframes rise {
     from {
@@ -55,6 +74,26 @@ body {
 
 ::selection {
   background-color: color-mix(in oklab, var(--color-accent) 25%, transparent);
+}
+
+/* Play mode: the map fills the screen; the card and the header step aside. */
+html[data-play] #waitlist-card-wrap,
+html[data-play] #site-header {
+  display: none;
+}
+
+html[data-play] #map-wrap {
+  position: fixed;
+  inset: 0;
+  height: auto;
+  min-height: 0;
+  z-index: 30;
+}
+
+html[data-play],
+html[data-play] body {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

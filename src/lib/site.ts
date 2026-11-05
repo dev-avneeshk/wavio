@@ -4,8 +4,8 @@ export const site = {
   pageTitle: "Free House Waitlist | Lazy Films City",
   headline: "Get a free house in my city.",
   description:
-    "Sign in with Google, add your Instagram username, and you're on the waitlist for a house in Lazy Films City.",
-  steps: ["Sign in with Google", "Add your Instagram", "You're on the list"],
-  privacyNote: "Your Google name, email and Instagram username are saved with your spot.",
-  oneEntryNote: "One spot per Google account and per Instagram account.",
+    "Sign in with Google, add your Instagram, and your house goes up on the next empty plot in Lazy Films City.",
+  steps: ["Sign in with Google", "Add your Instagram", "Get your house"],
+  privacyNote: "Your Instagram username is shown on your house. Your Google name and email stay private.",
+  oneEntryNote: "One house per Google account and per Instagram account.",
 } as const;

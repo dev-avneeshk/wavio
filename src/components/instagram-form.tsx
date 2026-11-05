@@ -1,12 +1,13 @@
 "use client";
 
-import { startTransition, useActionState, useState, type FormEvent } from "react";
+import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
 import { joinWaitlist, type JoinState } from "@/app/actions";
 import { INSTAGRAM_MAX_LENGTH, parseInstagramUsername } from "@/lib/instagram";
+import { setPreviewName } from "@/lib/preview-name";
 
 const initialState: JoinState = { error: null };
 
-export function InstagramForm() {
+export function InstagramForm({ nextPlot }: { nextPlot: number }) {
   const [state, submit, pending] = useActionState(joinWaitlist, initialState);
   const [value, setValue] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
@@ -14,6 +15,13 @@ export function InstagramForm() {
   const [editedSinceSubmit, setEditedSinceSubmit] = useState(false);
 
   const error = clientError ?? (editedSinceSubmit ? null : state.error);
+
+  // Show what they're typing on the tag above their plot (only once it's a valid username).
+  useEffect(() => {
+    const parsed = parseInstagramUsername(value);
+    setPreviewName(parsed.ok ? parsed.username : "");
+  }, [value]);
+  useEffect(() => () => setPreviewName(""), []);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -32,15 +40,15 @@ export function InstagramForm() {
   return (
     <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
-        <label htmlFor="instagram" className="text-sm font-medium text-zinc-200">
+        <label htmlFor="instagram" className="text-sm font-medium text-zinc-900">
           Instagram username
         </label>
         <div
-          className={`flex h-12 items-center rounded-2xl border bg-zinc-950/70 pl-4 pr-2 transition-colors focus-within:border-accent/70 ${
-            error ? "border-rose-400/60" : "border-white/10"
+          className={`flex h-12 items-center rounded-2xl border bg-white pl-4 pr-2 transition-colors focus-within:border-zinc-900 ${
+            error ? "border-red-400" : "border-zinc-300"
           }`}
         >
-          <span aria-hidden="true" className="select-none font-mono text-zinc-500">
+          <span aria-hidden="true" className="select-none font-mono text-zinc-400">
             @
           </span>
           <input
@@ -62,11 +70,11 @@ export function InstagramForm() {
             spellCheck={false}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? "instagram-error" : "instagram-help"}
-            className="h-full min-w-0 flex-1 bg-transparent pl-1 font-mono text-[15px] text-zinc-50 placeholder:text-zinc-600 focus:outline-none"
+            className="h-full min-w-0 flex-1 bg-transparent pl-1 font-mono text-[15px] text-zinc-950 placeholder:text-zinc-400 focus:outline-none"
           />
         </div>
         {error ? (
-          <p id="instagram-error" role="alert" className="text-sm text-rose-300">
+          <p id="instagram-error" role="alert" className="text-sm text-red-600">
             {error}
           </p>
         ) : (
@@ -79,9 +87,9 @@ export function InstagramForm() {
       <button
         type="submit"
         disabled={pending}
-        className="inline-flex h-12 items-center justify-center rounded-full bg-accent px-6 text-[15px] font-semibold text-zinc-950 shadow-[inset_0_-1px_0_rgba(0,0,0,0.18)] transition-[transform,background-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-soft active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 sm:self-start"
+        className="inline-flex h-12 items-center justify-center rounded-full bg-accent px-6 text-[15px] font-semibold text-white shadow-[inset_0_-2px_0_rgba(0,0,0,0.15)] transition-[transform,background-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-deep active:scale-[0.98] disabled:cursor-wait disabled:opacity-70"
       >
-        {pending ? "Saving your spot..." : "Join the waitlist"}
+        {pending ? "Building your house..." : `Claim house #${nextPlot}`}
       </button>
     </form>
   );

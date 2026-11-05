@@ -19,20 +19,27 @@ export default async function Home({ searchParams }: HomeProps) {
 
   if (!hasSupabaseEnv) {
     return (
-      <Shell step={0} signedIn={false} reserved={false} plot="#????">
+      <Shell step={0} signedIn={false} names={[]} mine={null} mineName={null}>
         <SetupNotice />
       </Shell>
     );
   }
 
   const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getClaims();
-  const claims = auth?.claims ?? null;
+  const [{ data: auth }, houses] = await Promise.all([supabase.auth.getClaims(), supabase.rpc("waitlist_houses")]);
 
+  // Every claimed Instagram username in join order: names[0] lives on plot #1.
+  if (houses.error) console.error("[waitlist] houses failed:", houses.error.code, houses.error.message);
+  const names: string[] = Array.isArray(houses.data)
+    ? houses.data.filter((n: unknown): n is string => typeof n === "string")
+    : [];
+  const nextPlot = names.length + 1;
+
+  const claims = auth?.claims ?? null;
   if (!claims) {
     return (
-      <Shell step={0} signedIn={false} reserved={false} plot="#????">
-        <SignInPanel authFailed={errorParam === "auth"} />
+      <Shell step={0} signedIn={false} names={names} mine={null} mineName={null}>
+        <SignInPanel authFailed={errorParam === "auth"} nextPlot={nextPlot} />
       </Shell>
     );
   }
@@ -49,7 +56,7 @@ export default async function Home({ searchParams }: HomeProps) {
   if (error) {
     console.error("[waitlist] load failed:", error.code, error.message);
     return (
-      <Shell step={1} signedIn reserved={false} plot="#????">
+      <Shell step={1} signedIn names={names} mine={null} mineName={null}>
         <LoadErrorPanel />
       </Shell>
     );
@@ -57,18 +64,17 @@ export default async function Home({ searchParams }: HomeProps) {
 
   if (!entry) {
     return (
-      <Shell step={1} signedIn reserved={false} plot="#????">
-        <JoinPanel email={email} />
+      <Shell step={1} signedIn names={names} mine={null} mineName={null}>
+        <JoinPanel email={email} nextPlot={nextPlot} />
       </Shell>
     );
   }
 
-  const { data: pos, error: posError } = await supabase.rpc("waitlist_position");
-  if (posError) console.error("[waitlist] position failed:", posError.code, posError.message);
-  const position = typeof pos === "number" && pos > 0 ? pos : null;
+  const index = names.indexOf(entry.instagram_username);
+  const position = index >= 0 ? index + 1 : null;
 
   return (
-    <Shell step={2} signedIn reserved plot={position ? `#${position}` : "#????"}>
+    <Shell step={2} signedIn names={names} mine={position} mineName={entry.instagram_username}>
       <OnListPanel entry={entry} position={position} email={email} />
     </Shell>
   );

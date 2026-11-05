@@ -6,23 +6,12 @@
 }
 
 @theme {
-  --color-accent: #e9c46a;
-  --color-accent-soft: #f3dc9b;
+  /* The red of the PLOT sign and the "Claim my house" button in the reel. */
+  --color-accent: #d23f2f;
+  --color-accent-deep: #b83426;
 
-  --animate-float: float 7s ease-in-out infinite;
   --animate-rise: rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-pulse-dot: pulse-dot 2.4s ease-in-out infinite;
-  --animate-glow: glow 3.2s ease-in-out infinite;
-
-  @keyframes float {
-    0%,
-    100% {
-      transform: translateY(0);
-    }
-    50% {
-      transform: translateY(-7px);
-    }
-  }
 
   @keyframes rise {
     from {
@@ -46,36 +35,26 @@
       transform: scale(0.8);
     }
   }
-
-  @keyframes glow {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.78;
-    }
-  }
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
-html {
-  background-color: var(--color-zinc-950);
+html,
+body {
+  background-color: #dde8ee;
 }
 
 body {
-  background-color: var(--color-zinc-950);
-  color: var(--color-zinc-100);
+  color: var(--color-zinc-900);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 ::selection {
-  background-color: color-mix(in oklab, var(--color-accent) 35%, transparent);
+  background-color: color-mix(in oklab, var(--color-accent) 25%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {

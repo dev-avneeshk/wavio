@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { site } from "@/lib/site";
 import "./globals.css";
@@ -11,17 +11,14 @@ export const metadata: Metadata = {
   description: site.description,
 };
 
+export const viewport: Viewport = {
+  themeColor: "#dde8ee",
+};
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body className="min-h-[100dvh]">
-        {/* Faint street-map dot grid, fixed so it never repaints on scroll. */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed inset-0 [background-image:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.07)_1px,transparent_0)] [background-size:28px_28px] [mask-image:radial-gradient(ellipse_at_70%_45%,black,transparent_72%)]"
-        />
-        {children}
-      </body>
+      <body className="min-h-[100dvh]">{children}</body>
     </html>
   );
 }

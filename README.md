@@ -1,9 +1,11 @@
 # House Waitlist
 
-A one-page waitlist: visitors sign in with Google, type their Instagram username, and get a place in line. Entries are stored in Supabase.
+A one-page waitlist on top of a 3D empty city (the "Lazy Films City" land from the free-house reel). Visitors sign in with Google, type their Instagram username, and a house goes up on the next empty plot with their `@username` on it. Entries are stored in Supabase.
 
-- **Stack:** Next.js 16 (App Router), Supabase Auth (Google) + Postgres, Tailwind CSS 4.
+- **Stack:** Next.js 16 (App Router), Supabase Auth (Google) + Postgres, Tailwind CSS 4, three.js for the city.
 - **Stored per person:** Google email, Google name, Instagram username (lowercase, no `@`), join time.
+- **Public:** the Instagram usernames, shown on the houses in join order (plot #1 is the first person). Google names and emails are never sent to the browser for anyone but the signed-in person.
+- **The city:** plot #1 is on Founders' Row facing the central plaza, and the city fills outward ring by ring. Plot numbers never change. Each house's colours and shape come from the username, so the same person always gets the same house.
 - **Rules:** one entry per Google account, one entry per Instagram username. Only a valid Instagram username is accepted (1-30 characters; letters, numbers, `.` and `_`; no link, no spaces, no email, no leading/trailing or double period). The form checks it, the server checks it again, and the database refuses anything else.
 - **Wording:** all page text is in `src/lib/site.ts`.
 
@@ -89,7 +91,7 @@ Open http://localhost:3000, click **Continue with Google**, pick an account, ent
 - Handy query for the SQL Editor:
 
   ```sql
-  select row_number() over (order by id) as place, instagram_username, full_name, email, created_at
+  select row_number() over (order by id) as plot, instagram_username, full_name, email, created_at
   from public.waitlist
   order by id;
   ```
@@ -113,19 +115,24 @@ Open http://localhost:3000, click **Continue with Google**, pick an account, ent
 | Google says "Access blocked" or only you can sign in | The Google app is still in Testing. Publish it (step 4b.5). |
 | After Google you land back on the page with "Google sign-in didn't finish" | Add your site's URL with `/**` to Supabase Redirect URLs (step 4d). |
 | After Google you end up on `localhost` when using the live site | Set the Supabase **Site URL** to your live URL and add the live URL to Redirect URLs. |
-| "Couldn't save your spot" or "Couldn't load your waitlist spot" | The table is probably missing. Run `supabase/schema.sql` again. The exact error is in the terminal running `npm run dev`. |
+| "Couldn't save your spot" or "Couldn't load your house" | The table is probably missing. Run `supabase/schema.sql` again. The exact error is in the terminal running `npm run dev`. |
+| The city shows no houses even though people joined | Run the latest `supabase/schema.sql` again (it adds the `waitlist_houses` function the map reads). |
+| The map says it needs WebGL | That browser has 3D graphics turned off. Joining still works. |
 
 ## Project layout
 
 ```
-supabase/schema.sql             table, security rules, place-in-line function
-src/app/page.tsx                loads the visitor's state and picks what to show
+supabase/schema.sql             table, security rules, public list of houses
+src/app/page.tsx                loads the houses + the visitor's state and picks what to show
 src/app/actions.ts              join the waitlist / sign out (server side)
 src/app/auth/callback/route.ts  finishes Google sign-in
 src/proxy.ts                    keeps the login session fresh
 src/lib/instagram.ts            Instagram username rules
 src/lib/site.ts                 all page wording
-src/components/                 page UI, Google button, Instagram form, house drawing
+src/components/waitlist-ui.tsx  the card (steps, sign-in, Instagram form, your house)
+src/components/land/layout.ts   city grid and plot numbering
+src/components/land/build.ts    builds the city, plots and houses
+src/components/land/engine.ts   3D scene, camera, pin, PLOT sign, name tags
 ```
 
 The previous portfolio is saved in git under the tag `portfolio-backup-2026-11-05` (`git checkout portfolio-backup-2026-11-05` to look at it).

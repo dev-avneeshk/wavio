@@ -43,13 +43,13 @@ export function GoogleButton() {
         type="button"
         onClick={signIn}
         disabled={pending}
-        className="group inline-flex h-12 w-full items-center justify-center gap-3 rounded-full bg-zinc-50 px-6 text-[15px] font-medium text-zinc-900 shadow-[inset_0_-1px_0_rgba(0,0,0,0.12)] transition-[transform,background-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 sm:w-auto"
+        className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-full border border-zinc-300 bg-white px-6 text-[15px] font-medium text-zinc-900 shadow-[0_2px_6px_-3px_rgba(0,0,0,0.2)] transition-[transform,background-color,border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-zinc-400 hover:bg-zinc-50 active:scale-[0.98] disabled:cursor-wait disabled:opacity-70"
       >
         <GoogleIcon className="size-5" />
         {pending ? "Opening Google..." : "Continue with Google"}
       </button>
       {error && (
-        <p role="alert" className="text-sm text-rose-300">
+        <p role="alert" className="text-sm text-red-600">
           {error}
         </p>
       )}

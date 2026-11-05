@@ -50,21 +50,22 @@ create policy "waitlist: add own entry"
   to authenticated
   with check ((select auth.uid()) = user_id);
 
--- 3. "You are #N in line": counts entries up to and including the caller's own.
---    Runs with elevated rights so it can count other rows, but only ever returns a number.
-create or replace function public.waitlist_position()
-returns integer
+-- 3. The houses on the map: every Instagram username in join order (first = plot #1).
+--    Everyone, signed in or not, can call it. It returns ONLY usernames; Google names
+--    and emails stay private. One JSON array, so it isn't cut off at the 1,000-row API limit.
+create or replace function public.waitlist_houses()
+returns json
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-  select count(*)::integer
-  from public.waitlist w
-  where w.id <= (
-    select own.id from public.waitlist own where own.user_id = (select auth.uid())
-  );
+  select coalesce(json_agg(w.instagram_username order by w.id), '[]'::json)
+  from public.waitlist w;
 $$;
 
-revoke execute on function public.waitlist_position() from public, anon;
-grant execute on function public.waitlist_position() to authenticated;
+revoke execute on function public.waitlist_houses() from public;
+grant execute on function public.waitlist_houses() to anon, authenticated;
+
+-- Removed in v2 of this file (plot numbers now come from waitlist_houses).
+drop function if exists public.waitlist_position();

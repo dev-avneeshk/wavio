@@ -184,7 +184,7 @@ const place = (l: LocalLot, town: number, local: number): Lot => {
   const [bx, bz] = blockC(l.i, l.j);
   return {
     town,
-    plot: firstPlotOf(town) + local - 1,
+    plot: local ? firstPlotOf(town) + local - 1 : 0, // 0: not a plot (park or plaza)
     i: l.i,
     j: l.j,
     row: l.row,
@@ -208,4 +208,21 @@ export const lotForPlot = (plot: number): Lot => {
 export const lotAt = (town: number, i: number, j: number, row: Row, k: number): Lot => {
   const l = localLot(i, j, row, k);
   return place(l, town, plotByKey.get(lotKey(l)) ?? 0);
+};
+
+// The plot under a point on the ground, or null (roads, parks, the plaza, between towns).
+export const lotAtPoint = (x: number, z: number): Lot | null => {
+  const town = townAtPoint(x, z);
+  if (!town) return null;
+  const [ox, oz] = townCenter(town);
+  const i = Math.round((x - ox) / PX);
+  const j = Math.round((z - oz) / PZ);
+  if (Math.abs(i) > TOWN_RINGS || Math.abs(j) > TOWN_RINGS) return null;
+  const bx = x - ox - i * PX;
+  const bz = z - oz - j * PZ;
+  const span = (BX - 4) / 2;
+  if (Math.abs(bx) > span || Math.abs(bz) > BZ / 2 - 1.9 || Math.abs(bz) < 0.5) return null;
+  const k = Math.min(PER_ROW - 1, Math.floor((bx + span) / LW));
+  const lot = lotAt(town, i, j, bz > 0 ? "S" : "N", k);
+  return lot.plot ? lot : null;
 };

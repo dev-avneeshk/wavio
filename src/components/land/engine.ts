@@ -3,9 +3,10 @@
 // Plain three.js driven by its own animation loop; React only mounts it and passes data in.
 import * as THREE from "three";
 import { MapControls } from "three/examples/jsm/controls/MapControls.js";
+import { getChosenPlot, setChosenPlot, subscribeChosenPlot } from "@/lib/plot-choice";
 import { getPreviewName } from "@/lib/preview-name";
 import { site } from "@/lib/site";
-import { TOWN_SIZE, housesInTown, townOf, type MyHouse, type WorldView } from "@/lib/world";
+import { TOWN_SIZE, housesInTown, isOpenPlot, townOf, type MyHouse, type WorldView } from "@/lib/world";
 import {
   HOOK_Y,
   LANDMARKS,
@@ -27,7 +28,20 @@ import {
 } from "./build";
 import { SHAPES, buildCountry, buildFarTowns, extentOf, type Extent, type Inst, type Trees } from "./country";
 import { Builder, rot } from "./geo";
-import { SEA_Z, TOWN_HALF, Y0, lastTownOfRing, lotForPlot, townAtPoint, townCenter, townRing, type Lot } from "./layout";
+import {
+  BZ,
+  LW,
+  SEA_Z,
+  TOWN_HALF,
+  Y0,
+  lastTownOfRing,
+  lotAtPoint,
+  lotForPlot,
+  townAtPoint,
+  townCenter,
+  townRing,
+  type Lot,
+} from "./layout";
 
 const FONT = 'ui-rounded, "SF Pro Rounded", -apple-system, "Helvetica Neue", Arial, sans-serif';
 const SKY_FOG = "#DDE8EE";
@@ -145,7 +159,7 @@ const glowTex = () =>
     g.fillRect(0, 0, 256, 256);
   });
 
-type Tag = { el: HTMLDivElement; title: HTMLSpanElement; sub: HTMLSpanElement };
+type Tag = { el: HTMLDivElement; pill: HTMLDivElement; arrow: HTMLDivElement; title: HTMLSpanElement; sub: HTMLSpanElement };
 
 // HTML tag that follows a point in the 3D scene (same look as the tags in the reel).
 const makeTag = (bg: string, color: string): Tag => {
@@ -153,16 +167,25 @@ const makeTag = (bg: string, color: string): Tag => {
   el.style.cssText =
     "position:absolute;left:0;top:0;pointer-events:none;will-change:transform;opacity:0;transition:opacity .2s ease;";
   const pill = document.createElement("div");
-  pill.style.cssText = `background:${bg};color:${color};border-radius:16px;padding:7px 14px;font:800 15px/1.1 ${FONT};white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.22);max-width:72vw;overflow:hidden;text-overflow:ellipsis;text-align:center;`;
+  pill.style.cssText = `background:${bg};color:${color};border-radius:16px;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.22);max-width:72vw;overflow:hidden;text-overflow:ellipsis;text-align:center;`;
   const title = document.createElement("span");
   title.style.cssText = "display:block;overflow:hidden;text-overflow:ellipsis;";
   const sub = document.createElement("span");
   sub.style.cssText = "display:none;margin-top:3px;font:700 11px/1.1 " + FONT + ";opacity:.72;letter-spacing:.02em;";
   pill.append(title, sub);
   const arrow = document.createElement("div");
-  arrow.style.cssText = `width:12px;height:12px;background:${bg};transform:rotate(45deg);margin:-7px auto 0;border-radius:2px;`;
+  arrow.style.cssText = `background:${bg};transform:rotate(45deg);margin:-6px auto 0;border-radius:2px;`;
   el.append(pill, arrow);
-  return { el, title, sub };
+  const tag = { el, pill, arrow, title, sub };
+  sizeTag(tag, false);
+  return tag;
+};
+
+// Phones get smaller, one-line tags so the map isn't buried under text.
+const sizeTag = (tag: Tag, compact: boolean) => {
+  tag.pill.style.padding = compact ? "5px 10px" : "7px 14px";
+  tag.pill.style.font = `800 ${compact ? 12 : 15}px/1.1 ${FONT}`;
+  tag.arrow.style.width = tag.arrow.style.height = compact ? "9px" : "12px";
 };
 
 const setTagText = (tag: Tag, title: string, sub = "") => {
@@ -171,6 +194,12 @@ const setTagText = (tag: Tag, title: string, sub = "") => {
     tag.sub.textContent = sub;
     tag.sub.style.display = sub ? "block" : "none";
   }
+};
+
+const setTagColor = (tag: Tag, bg: string) => {
+  if (tag.pill.style.background === bg) return;
+  tag.pill.style.background = bg;
+  tag.arrow.style.background = bg;
 };
 
 type View = { target: THREE.Vector3; radius: number; phi: number; theta: number };
@@ -244,6 +273,12 @@ export class LandEngine {
   private pin = new THREE.Group();
   private glow: THREE.Mesh;
   private sign = new THREE.Group();
+  // White wash over the empty plot under the mouse, when you can pick one.
+  private pickMark = new THREE.Mesh(
+    new THREE.PlaneGeometry(LW - 0.8, BZ / 2 - 2.6).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: "#FFFFFF", transparent: true, opacity: 0.38, depthWrite: false }),
+  );
+  private unsubChoice: () => void;
   private labels: HTMLDivElement;
   private focusTag = makeTag("#F7C631", "#2C2F34");
   private hoverTag = makeTag("#FFFFFF", "#2C2F34");
@@ -273,6 +308,12 @@ export class LandEngine {
   private disposed = false;
   private reduced: boolean;
   private shadowRes: number;
+  // Phones and tablets: lighter town, fewer pixels, 30 fps and fewer shadow redraws while nothing moves.
+  private lowPower: boolean;
+  private compact = false;
+  private idle = 0;
+  private lastCam = new THREE.Vector3();
+  private lastTarget = new THREE.Vector3();
   private ro: ResizeObserver;
   private io: IntersectionObserver;
   private width = 1;
@@ -288,13 +329,15 @@ export class LandEngine {
     this.opts = opts;
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const coarse = window.matchMedia("(pointer: coarse)").matches;
+    this.lowPower = coarse;
     this.shadowRes = coarse ? 1024 : 2048;
 
     // Throws if WebGL is unavailable; the caller shows a fallback.
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, coarse ? 1.75 : 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.autoUpdate = !coarse;
     this.renderer.localClippingEnabled = true;
     const canvas = this.renderer.domElement;
     canvas.style.cssText = "display:block;width:100%;height:100%;outline:none;";
@@ -343,8 +386,9 @@ export class LandEngine {
     const tip = new THREE.Mesh(new THREE.ConeGeometry(1.86, 4.3, 32), this.pinMat);
     tip.position.y = 4.75;
     tip.rotation.x = Math.PI;
-    ball.castShadow = true;
-    tip.castShadow = true;
+    // On phones the shadows are redrawn only now and then, so the bobbing pin would leave a stepping shadow.
+    ball.castShadow = !coarse;
+    tip.castShadow = !coarse;
     const pinBody = new THREE.Group();
     pinBody.add(ball, tip);
     pinBody.scale.setScalar(PIN_SCALE);
@@ -364,7 +408,10 @@ export class LandEngine {
     this.makeSignBoard(this.sign, this.signMat);
     this.makeSignBoard(this.ownSign, this.ownSignMat);
     this.ownSign.visible = false;
-    this.scene.add(this.sign, this.ownSign);
+    this.pickMark.visible = false;
+    this.pickMark.renderOrder = 1;
+    this.scene.add(this.sign, this.ownSign, this.pickMark);
+    this.unsubChoice = subscribeChosenPlot(this.onChoice);
 
     // Controls: drag to pan, right-drag / two fingers to rotate, wheel / pinch to zoom.
     this.controls = new MapControls(this.camera, canvas);
@@ -406,6 +453,7 @@ export class LandEngine {
     this.view = view;
     this.me = view.me;
     this.towns.set(view.town, new Map(view.plots));
+    if (view.me) setChosenPlot(null);
     if (first || justJoined) this.active = view.town;
 
     this.updateWorld();
@@ -448,6 +496,7 @@ export class LandEngine {
 
   dispose() {
     this.disposed = true;
+    this.unsubChoice();
     cancelAnimationFrame(this.raf);
     this.ro.disconnect();
     this.io.disconnect();
@@ -480,11 +529,39 @@ export class LandEngine {
   // ---------- data -> scene ----------
 
   private next() {
-    return (this.view?.last ?? 0) + 1;
+    return this.view?.next ?? 1;
   }
 
   private openTown() {
-    return townOf(this.next());
+    return this.view?.open ?? 1;
+  }
+
+  // The plot the visitor picked, if it can still be had (null: they get the next free one).
+  private chosen(): number | null {
+    const c = getChosenPlot();
+    if (!c || !this.view || this.me || !isOpenPlot(this.view, c)) return null;
+    return this.towns.get(townOf(c))?.has(c) ? null : c;
+  }
+
+  // An empty plot you could pick under a screen point: in the town drawn in detail, in an open town.
+  private freeLotAt(clientX: number, clientY: number): Lot | null {
+    if (!this.view || this.me) return null;
+    this.setRay(clientX, clientY);
+    const p = this.ray.ray.intersectPlane(this.groundPlane, new THREE.Vector3());
+    const lot = p ? lotAtPoint(p.x, p.z) : null;
+    if (!lot || lot.town !== this.active || !isOpenPlot(this.view, lot.plot)) return null;
+    return this.towns.get(lot.town)?.has(lot.plot) ? null : lot;
+  }
+
+  private onChoice = () => {
+    if (!this.view) return;
+    this.updateFocus();
+    this.wake();
+  };
+
+  // Something changed that the next frame must show.
+  private wake() {
+    this.idle = 0;
   }
 
   private houses(t: number) {
@@ -506,19 +583,25 @@ export class LandEngine {
     }
     this.rebuildFar();
     this.updateTownTags();
+    // A picked plot that someone else has taken meanwhile goes back to "next free plot".
+    const c = getChosenPlot();
+    if (c !== null && (this.me || this.chosen() === null)) setChosenPlot(null);
+    this.updateFocus();
+  }
 
-    // Focus: your house, or the next free plot.
+  // Focus: your house, the plot you picked, or the next free plot. The PLOT sign stands on the
+  // plot you'd get.
+  private updateFocus() {
     const me = this.me;
     if (me) {
       const { lot, spec } = specForPlot(me.plot);
       this.focus = { lot, n: me.plot, baseY: siteTop(spec) - 1.6, own: true };
     } else {
-      const n = this.next();
+      const n = this.chosen() ?? this.next();
       this.focus = { lot: lotForPlot(n), n, baseY: Y0, own: false };
     }
 
-    // Sign on the next free plot, near its street-side corner.
-    const nl = lotForPlot(this.next());
+    const nl = lotForPlot(me ? this.next() : this.focus.n);
     const [sx, sz] = rot(-3.4, 6.6, nl.rot);
     this.sign.position.set(nl.x + sx, Y0, nl.z + sz);
     this.sign.rotation.y = nl.rot + 0.25;
@@ -565,6 +648,7 @@ export class LandEngine {
   }
 
   private rebuildFar() {
+    this.wake();
     this.clearGroup(this.far);
     const f = buildFarTowns(this.maxTown, this.active, (t) => this.houses(t));
     const ground = new THREE.Mesh(f.ground, this.lam);
@@ -578,10 +662,11 @@ export class LandEngine {
 
   private rebuildTown() {
     if (!this.active) return;
+    this.wake();
     const plots = this.towns.get(this.active) ?? new Map<number, string>();
     const mine = this.me && townOf(this.me.plot) === this.active ? this.me.plot : null;
     const prev = this.built;
-    const built = buildTown(this.active, plots, mine, this.next());
+    const built = buildTown(this.active, plots, mine, this.focus?.n ?? this.next(), this.lowPower);
     this.built = built;
     this.city.geometry = built.city;
     this.dash.geometry = built.dash;
@@ -714,6 +799,7 @@ export class LandEngine {
     this.townTags = [];
     for (let t = 1; t <= this.maxTown; t++) {
       const tag = makeTag("#FFFFFF", "#2C2F34");
+      sizeTag(tag, this.compact);
       this.labels.insertBefore(tag.el, this.hoverTag.el);
       this.townTags.push({ t, tag });
     }
@@ -734,11 +820,9 @@ export class LandEngine {
               : t === open + 1
                 ? "Opens next"
                 : "Empty land";
-      setTagText(tag, site.townName(t), sub);
-      const pill = tag.el.firstElementChild as HTMLDivElement;
-      const bg = t === mine ? "#F7C631" : t === open ? "#FFFFFF" : "rgba(255,255,255,0.86)";
-      pill.style.background = bg;
-      (tag.el.lastElementChild as HTMLDivElement).style.background = bg;
+      // Phones: just the name; your town is yellow, the town filling now is solid white.
+      setTagText(tag, site.townName(t), this.compact ? "" : sub);
+      setTagColor(tag, t === mine ? "#F7C631" : t === open ? "#FFFFFF" : "rgba(255,255,255,0.78)");
     }
   }
 
@@ -917,7 +1001,10 @@ export class LandEngine {
     if (e.pointerType !== "mouse" || e.buttons !== 0) return;
     this.hovered = this.pick(e.clientX, e.clientY);
     const far = this.camera.position.distanceTo(this.controls.target) > LABEL_D;
-    this.renderer.domElement.style.cursor = this.hovered || (far && this.pickTown(e.clientX, e.clientY)) ? "pointer" : "";
+    const lot = !this.hovered && !far ? this.freeLotAt(e.clientX, e.clientY) : null;
+    this.markLot(lot && lot.plot !== this.focus?.n ? lot : null);
+    this.renderer.domElement.style.cursor =
+      this.hovered || lot || (far && this.pickTown(e.clientX, e.clientY)) ? "pointer" : "";
   };
 
   private onPointerUp = (e: PointerEvent) => {
@@ -926,18 +1013,42 @@ export class LandEngine {
     if (!d) return;
     const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y);
     if (moved >= 6 || performance.now() - d.t >= 450) return;
+    this.wake();
     this.selected = this.pick(e.clientX, e.clientY);
-    // Zoomed out, a tap on a town flies there.
-    if (!this.selected && this.camera.position.distanceTo(this.controls.target) > LABEL_D) {
+    if (this.selected) return;
+    if (this.camera.position.distanceTo(this.controls.target) > LABEL_D) {
+      // Zoomed out, a tap on a town flies there.
       const t = this.pickTown(e.clientX, e.clientY);
       if (t) void this.flyToTown(t);
+      return;
     }
+    // A tap on an empty plot picks it.
+    const lot = this.freeLotAt(e.clientX, e.clientY);
+    if (lot) this.choose(lot);
   };
 
   private onPointerLeave = () => {
     this.hovered = null;
+    this.markLot(null);
     this.renderer.domElement.style.cursor = "";
   };
+
+  private markLot(lot: Lot | null) {
+    this.pickMark.visible = Boolean(lot);
+    if (!lot) return;
+    this.pickMark.position.set(lot.x, Y0 + 0.09, lot.row === "S" ? lot.cz + 9.3 : lot.cz - 9.3);
+  }
+
+  // Pick a plot: the pin, tag and PLOT sign move there and the camera glides over, keeping its zoom.
+  private choose(lot: Lot) {
+    setChosenPlot(lot.plot === this.next() ? null : lot.plot);
+    this.markLot(null);
+    const from = new THREE.Spherical().setFromVector3(this.tmp.copy(this.camera.position).sub(this.controls.target));
+    this.flyTo(
+      { target: new THREE.Vector3(lot.x, Y0 + 1.5, lot.z), radius: clamp(from.radius, 50, 420), phi: from.phi, theta: from.theta },
+      700,
+    );
+  }
 
   // ---------- frame ----------
 
@@ -954,6 +1065,13 @@ export class LandEngine {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.fov = w / h < 0.9 ? 55 : 42;
+    const compact = w < 640;
+    if (compact !== this.compact) {
+      this.compact = compact;
+      for (const tag of [this.focusTag, this.hoverTag, ...this.townTags.map((t) => t.tag)]) sizeTag(tag, compact);
+      this.updateTownTags();
+    }
+    this.wake();
     this.insetGoal = clamp(this.opts.leftInset(), 0, w * 0.6);
     // The first measurement applies at once; later changes ease in from the frame loop.
     if (this.inset < 0) this.inset = this.insetGoal;
@@ -1073,6 +1191,17 @@ export class LandEngine {
       this.sun.shadow.normalBias = 0.03 + half * 0.0018;
     }
 
+    // Phones: while nothing moves, draw every other frame and redraw shadows only now and then.
+    const camMoved = this.camera.position.distanceToSquared(this.lastCam) > 1e-6 || target.distanceToSquared(this.lastTarget) > 1e-6;
+    this.lastCam.copy(this.camera.position);
+    this.lastTarget.copy(target);
+    if (camMoved || this.flight || this.revealStart >= 0 || Math.abs(this.insetGoal - this.inset) > 0.5) this.idle = 0;
+    else this.idle++;
+    if (this.lowPower) {
+      if (this.idle % 2 === 1) return;
+      this.renderer.shadowMap.needsUpdate = this.idle === 0 || this.idle % 16 === 0;
+    }
+
     const secs = now / 1000;
 
     // Your house goes up from the ground, layer by layer; the crane keeps working.
@@ -1098,12 +1227,14 @@ export class LandEngine {
       this.glow.position.set(f.lot.x, Y0 + 0.1, f.lot.z);
       const pulse = this.reduced ? 1 : 1 + Math.sin(secs * 2) * 0.05;
       this.glow.scale.set(pulse, pulse, 1);
-      if (f.own) {
-        setTagText(this.focusTag, `@${this.me?.username ?? "you"} · House #${fmt(f.n)}`, `Being built · ${site.townName(f.lot.town)}`);
-      } else {
-        const typed = getPreviewName();
-        setTagText(this.focusTag, `@${typed || "???"} · House #${fmt(f.n)}`, `${site.townName(f.lot.town)} · available`);
-      }
+      const who = f.own ? this.me?.username ?? "you" : getPreviewName() || "???";
+      const house = this.compact ? `#${fmt(f.n)}` : `House #${fmt(f.n)}`;
+      const sub = this.compact
+        ? ""
+        : f.own
+          ? `Being built · ${site.townName(f.lot.town)}`
+          : `${site.townName(f.lot.town)} · ${getChosenPlot() === f.n ? "your pick" : "available"}`;
+      setTagText(this.focusTag, `@${who} · ${house}`, sub);
       // Fade it out as the camera pulls up into the world view, so town labels take over.
       const op = clamp(1 - (d - LABEL_D * 1.6) / 600, 0, 1);
       this.placeTag(this.focusTag, f.lot.x, baseY + bob + PIN_HEIGHT + 0.8, f.lot.z, true, op);

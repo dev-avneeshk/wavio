@@ -669,8 +669,15 @@ export type TownBuild = {
   houses: HouseHit[];
 };
 
-// plots: house number -> Instagram username, for this town. mine / next are house numbers.
-export const buildTown = (town: number, plots: ReadonlyMap<number, string>, mine: number | null, next: number): TownBuild => {
+// plots: house number -> Instagram username, for this town. mine / focus are house numbers (focus =
+// the plot with the pin, kept clear of trees). lite: fewer pieces per site, for phones.
+export const buildTown = (
+  town: number,
+  plots: ReadonlyMap<number, string>,
+  mine: number | null,
+  focus: number,
+  lite = false,
+): TownBuild => {
   const [ox, oz] = townCenter(town);
   const b = new Builder();
   const dash = new Builder();
@@ -700,7 +707,7 @@ export const buildTown = (town: number, plots: ReadonlyMap<number, string>, mine
           const lot = lotAt(town, i, j, row, k);
           const name = plots.get(lot.plot);
           if (name === undefined) {
-            emptyLot(b, lot, lot.plot === next);
+            emptyLot(b, lot, lot.plot === focus);
             continue;
           }
           if (lot.plot === mine) {
@@ -713,12 +720,13 @@ export const buildTown = (town: number, plots: ReadonlyMap<number, string>, mine
             continue;
           }
           const spec = houseSpec(lot.plot, lot, lot.x, lot.z);
+          if (lite) spec.detail = false;
           const r = rng(hashStr(`site:${lot.plot}`));
           addSite(b, spec, YARD(spec.d), LW, r);
           if (spec.stage === 1 && lot.ring >= 2 && r() < 0.05) addStaticCrane(b, spec, r);
           houses.push(hitBox(lot.plot, name, lot, spec));
         }
-      if (ringOf(i, j) <= 4)
+      if (ringOf(i, j) <= (lite ? 2 : 4))
         for (const sx of [-1, 1]) for (const sz of [-1, 1]) addLamp(b, cx + sx * (BX / 2 - 0.8), 0.3, cz + sz * (BZ / 2 - 0.8));
     }
 

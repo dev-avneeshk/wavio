@@ -3,6 +3,7 @@ import { GoogleButton } from "@/components/google-button";
 import { CheckIcon, HouseGlyph, PaintRollerIcon } from "@/components/icons";
 import { InstagramForm } from "@/components/instagram-form";
 import { Land } from "@/components/land/land";
+import { PlotChoiceNote } from "@/components/plot-choice-note";
 import { ShellFrame } from "@/components/shell-frame";
 import { site } from "@/lib/site";
 import { TOWN_SIZE, nextPlot, plotInTown, townOf, type MyHouse, type WorldView } from "@/lib/world";
@@ -114,9 +115,8 @@ export function SignInPanel({ authFailed, nextPlot }: { authFailed: boolean; nex
         </p>
       )}
       <GoogleButton />
-      <p className="text-sm text-zinc-500">
-        Next you&apos;ll add your Instagram, and house #{fmt(nextPlot)} in {site.townName(townOf(nextPlot))} is yours.
-      </p>
+      <p className="text-sm text-zinc-500">Next you&apos;ll add your Instagram, and the plot is yours.</p>
+      <PlotChoiceNote nextPlot={nextPlot} />
     </div>
   );
 }

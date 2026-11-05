@@ -2,7 +2,9 @@
 
 import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
 import { joinWaitlist, type JoinState } from "@/app/actions";
+import { PlotChoiceNote } from "@/components/plot-choice-note";
 import { INSTAGRAM_MAX_LENGTH, parseInstagramUsername } from "@/lib/instagram";
+import { setChosenPlot, useChosenPlot } from "@/lib/plot-choice";
 import { setPreviewName } from "@/lib/preview-name";
 
 const initialState: JoinState = { error: null };
@@ -13,6 +15,8 @@ export function InstagramForm({ nextPlot }: { nextPlot: number }) {
   const [clientError, setClientError] = useState<string | null>(null);
   // Hide the last server error once the user starts editing again.
   const [editedSinceSubmit, setEditedSinceSubmit] = useState(false);
+  const chosen = useChosenPlot();
+  const plot = chosen ?? nextPlot;
 
   const error = clientError ?? (editedSinceSubmit ? null : state.error);
 
@@ -22,6 +26,11 @@ export function InstagramForm({ nextPlot }: { nextPlot: number }) {
     setPreviewName(parsed.ok ? parsed.username : "");
   }, [value]);
   useEffect(() => () => setPreviewName(""), []);
+
+  // Their pick was taken (or isn't open): fall back to the next free plot.
+  useEffect(() => {
+    if (state.plotGone) setChosenPlot(null);
+  }, [state]);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -34,6 +43,7 @@ export function InstagramForm({ nextPlot }: { nextPlot: number }) {
     setEditedSinceSubmit(false);
     const formData = new FormData();
     formData.set("instagram", result.username);
+    if (chosen !== null) formData.set("plot", String(chosen));
     startTransition(() => submit(formData));
   }
 
@@ -84,12 +94,14 @@ export function InstagramForm({ nextPlot }: { nextPlot: number }) {
         )}
       </div>
 
+      <PlotChoiceNote nextPlot={nextPlot} />
+
       <button
         type="submit"
         disabled={pending}
         className="inline-flex h-12 items-center justify-center rounded-full bg-accent px-6 text-[15px] font-semibold text-white shadow-[inset_0_-2px_0_rgba(0,0,0,0.15)] transition-[transform,background-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent-deep active:scale-[0.98] disabled:cursor-wait disabled:opacity-70"
       >
-        {pending ? "Building your house..." : `Claim house #${nextPlot}`}
+        {pending ? "Saving your plot..." : `Claim house #${plot.toLocaleString("en")}`}
       </button>
     </form>
   );

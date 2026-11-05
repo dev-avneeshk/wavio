@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { hasSupabaseEnv } from "@/lib/env";
+import { useChosenPlot } from "@/lib/plot-choice";
 import { site } from "@/lib/site";
 import { createClient } from "@/lib/supabase/client";
 import { TOWN_SIZE, nextPlot, parseWorldView, type WorldView } from "@/lib/world";
@@ -38,6 +39,7 @@ export default function LandView({ view }: LandProps) {
   const engineRef = useRef<LandEngine | null>(null);
   const [failed, setFailed] = useState(false);
   const [info, setInfo] = useState<ViewInfo | null>(null);
+  const chosen = useChosenPlot();
 
   useEffect(() => {
     const host = hostRef.current;
@@ -87,7 +89,12 @@ export default function LandView({ view }: LandProps) {
         </p>
         <div className="pointer-events-auto ml-auto flex flex-wrap justify-end gap-2 md:ml-0">
           {info && townLabel && (
-            <MapButton onClick={() => void engineRef.current?.flyToTown(info.town)} label={`Show all of ${site.townName(info.town)}`}>
+            // Phones: left out, to keep text off the map (zoom out to see town names).
+            <MapButton
+              className="hidden sm:block"
+              onClick={() => void engineRef.current?.flyToTown(info.town)}
+              label={`Show all of ${site.townName(info.town)}`}
+            >
               {townLabel}
             </MapButton>
           )}
@@ -95,7 +102,7 @@ export default function LandView({ view }: LandProps) {
             World
           </MapButton>
           <MapButton strong onClick={() => void engineRef.current?.flyToFocus()}>
-            {view.me ? "My house" : `Plot #${fmt(nextPlot(view))}`}
+            {view.me ? "My house" : `Plot #${fmt(chosen ?? nextPlot(view))}`}
           </MapButton>
         </div>
       </div>
@@ -108,11 +115,13 @@ function MapButton({
   onClick,
   strong,
   label,
+  className = "",
 }: {
   children: React.ReactNode;
   onClick: () => void;
   strong?: boolean;
   label?: string;
+  className?: string;
 }) {
   return (
     <button
@@ -122,7 +131,7 @@ function MapButton({
       title={label}
       className={`h-10 whitespace-nowrap rounded-full px-4 text-sm font-semibold shadow-[0_6px_18px_-8px_rgba(0,0,0,0.45)] backdrop-blur transition-[transform,background-color] duration-200 active:scale-[0.97] ${
         strong ? "bg-zinc-900 text-white hover:bg-zinc-800" : "bg-white/90 text-zinc-800 hover:bg-white"
-      }`}
+      } ${className}`}
     >
       {children}
     </button>

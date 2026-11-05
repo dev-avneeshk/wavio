@@ -2,8 +2,9 @@
 -- Run this once in Supabase: Dashboard -> SQL Editor -> New query -> paste -> Run.
 -- Safe to run again: it skips or replaces what already exists.
 --
--- The world is made of towns. Every town has 1,000 plots, and house numbers run on across towns
--- in join order: houses 1-1,000 are Town 1, 1,001-2,000 are Town 2, and so on, with no end.
+-- The world is made of towns. Every town has 1,000 plots, and house numbers run on across towns:
+-- houses 1-1,000 are Town 1, 1,001-2,000 are Town 2, and so on, with no end. People can pick any
+-- empty plot in an open town, or take the next free one.
 -- (The 1,000 also lives in src/lib/world.ts as TOWN_SIZE. Change both together, never after launch.)
 
 -- 1. The table: one row per Google account, one row per Instagram username.
@@ -18,8 +19,8 @@ create table if not exists public.waitlist (
   -- The only value the user types. Stored lowercase, without the @.
   instagram_username text not null,
 
-  -- House number, given out by the database in join order (section 3). It never changes, even if
-  -- someone is deleted, so nobody's house ever moves.
+  -- House number: the plot the person picked, or the next free one (section 3). It never changes,
+  -- even if someone else is deleted, so nobody's house ever moves.
   plot integer not null,
 
   created_at timestamptz not null default now(),
@@ -65,13 +66,14 @@ end;
 $$;
 
 -- 2. Lock the table down. Signed-in users may read their own row and add exactly one row.
---    They can only send instagram_username; user_id, email, name and plot come from the database.
+--    They can only send instagram_username and (optionally) the plot they picked; user_id, email
+--    and name come from their session, and section 3 checks the plot.
 --    Nobody can update or delete rows from the website (you can, from the dashboard).
 alter table public.waitlist enable row level security;
 
 revoke all on table public.waitlist from anon, authenticated;
 grant select on table public.waitlist to authenticated;
-grant insert (instagram_username) on table public.waitlist to authenticated;
+grant insert (instagram_username, plot) on table public.waitlist to authenticated;
 
 drop policy if exists "waitlist: read own entry" on public.waitlist;
 create policy "waitlist: read own entry"
@@ -85,17 +87,53 @@ create policy "waitlist: add own entry"
   to authenticated
   with check ((select auth.uid()) = user_id);
 
--- 3. House numbers. Each new row gets the next number after the highest one so far.
---    Signups take turns (an advisory lock), so two people never get the same house.
+-- 3. House numbers.
+--    - next: the lowest free house number. Anyone who doesn't pick a plot gets this one.
+--    - open: the highest town people can pick in. A town opens only once every town before it is
+--      full, so towns still fill in order: Town 2 opens when Town 1's 1,000 plots are taken.
+create or replace function public.waitlist_frontier(out next integer, out open integer)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with f as (
+    select
+      case
+        when not exists (select 1 from public.waitlist where plot = 1) then 1
+        else (
+          select min(w.plot) + 1
+          from public.waitlist w
+          where not exists (select 1 from public.waitlist x where x.plot = w.plot + 1)
+        )
+      end as next,
+      (select coalesce(max(plot), 0) from public.waitlist) as last
+  )
+  select f.next, greatest((f.next - 1) / 1000 + 1, (greatest(f.last, 1) - 1) / 1000 + 1)
+  from f;
+$$;
+
+revoke execute on function public.waitlist_frontier() from public, anon, authenticated;
+
+--    Each new row either keeps the plot the person picked (if it's in an open town; a plot that's
+--    already taken fails the unique rule) or gets `next`. Signups take turns (an advisory lock), so
+--    two people never get the same house.
 create or replace function public.waitlist_assign_plot()
 returns trigger
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  f record;
 begin
   perform pg_advisory_xact_lock(hashtext('public.waitlist.plot'));
-  select coalesce(max(w.plot), 0) + 1 into new.plot from public.waitlist w;
+  select * into f from public.waitlist_frontier();
+  if new.plot is null then
+    new.plot := f.next;
+  elsif new.plot < 1 or new.plot > f.open * 1000 then
+    raise exception 'plot % is not open yet', new.plot using hint = 'waitlist_plot_not_open';
+  end if;
   return new;
 end;
 $$;
@@ -110,7 +148,8 @@ create trigger waitlist_assign_plot
 -- 4. What the map needs, in one call. Everyone, signed in or not, can call it.
 --    It returns ONLY Instagram usernames and house numbers; Google names and emails stay private.
 --    - houses: how many people are on the waitlist
---    - last:   the highest house number given out (the next person gets last + 1)
+--    - last:   the highest house number given out
+--    - next / open: see section 3
 --    - towns:  [town, houses] for every town that has houses
 --    - town + plots: one town's houses as [house number, username] (at most 1,000 rows).
 --      p_town picks the town; without it you get the caller's own town, or else the town
@@ -127,6 +166,9 @@ as $$
     select count(*)::int as houses, coalesce(max(plot), 0) as last
     from public.waitlist
   ),
+  frontier as (
+    select * from public.waitlist_frontier()
+  ),
   me as (
     select w.plot, w.instagram_username as username, w.created_at as "createdAt"
     from public.waitlist w
@@ -136,12 +178,14 @@ as $$
     select greatest(1, least(1000000, coalesce(
       p_town,
       (select (m.plot - 1) / 1000 + 1 from me m),
-      (select s.last / 1000 + 1 from stats s)
+      (select (f.next - 1) / 1000 + 1 from frontier f)
     ))) as town
   )
   select json_build_object(
     'houses', s.houses,
     'last', s.last,
+    'next', f.next,
+    'open', f.open,
     'towns', coalesce((
       select json_agg(json_build_array(t.town, t.n) order by t.town)
       from (
@@ -158,7 +202,7 @@ as $$
     ), '[]'::json),
     'me', (select row_to_json(m) from me m)
   )
-  from stats s, pick p;
+  from stats s, frontier f, pick p;
 $$;
 
 revoke execute on function public.waitlist_world(integer) from public;

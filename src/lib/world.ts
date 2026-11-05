@@ -12,16 +12,22 @@ export type MyHouse = { plot: number; username: string; createdAt: string };
 // What public.waitlist_world() returns: the whole world in numbers, plus one town's houses.
 export type WorldView = {
   houses: number; // people on the waitlist
-  last: number; // highest house number given out; the next person gets last + 1
+  last: number; // highest house number given out
+  next: number; // lowest free house number: what you get if you don't pick a plot
+  open: number; // highest town you can pick a plot in (towns open one at a time, in order)
   towns: [number, number][]; // [town, houses] for towns that have houses
   town: number; // the town `plots` belongs to
   plots: [number, string][]; // [house number, Instagram username], in house order
   me: MyHouse | null; // the signed-in visitor's own house
 };
 
-export const emptyWorld: WorldView = { houses: 0, last: 0, towns: [], town: 1, plots: [], me: null };
+export const emptyWorld: WorldView = { houses: 0, last: 0, next: 1, open: 1, towns: [], town: 1, plots: [], me: null };
 
-export const nextPlot = (view: Pick<WorldView, "last">) => view.last + 1;
+export const nextPlot = (view: Pick<WorldView, "next">) => view.next;
+
+// Can someone pick this house number? (Whether it's free is checked against the town's houses.)
+export const isOpenPlot = (view: Pick<WorldView, "open">, plot: number) =>
+  Number.isInteger(plot) && plot >= 1 && plot <= view.open * TOWN_SIZE;
 
 export const housesInTown = (view: Pick<WorldView, "towns">, town: number) =>
   view.towns.find(([t]) => t === town)?.[1] ?? 0;
@@ -32,7 +38,16 @@ const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInt
 export const parseWorldView = (data: unknown): WorldView | null => {
   if (!data || typeof data !== "object") return null;
   const d = data as Record<string, unknown>;
-  if (!isInt(d.houses) || !isInt(d.last) || !isInt(d.town) || !Array.isArray(d.towns) || !Array.isArray(d.plots)) return null;
+  if (
+    !isInt(d.houses) ||
+    !isInt(d.last) ||
+    !isInt(d.next) ||
+    !isInt(d.open) ||
+    !isInt(d.town) ||
+    !Array.isArray(d.towns) ||
+    !Array.isArray(d.plots)
+  )
+    return null;
 
   const towns: [number, number][] = [];
   for (const t of d.towns) if (Array.isArray(t) && isInt(t[0]) && isInt(t[1])) towns.push([t[0], t[1]]);
@@ -48,5 +63,5 @@ export const parseWorldView = (data: unknown): WorldView | null => {
     }
   }
 
-  return { houses: d.houses, last: d.last, towns, town: d.town, plots, me };
+  return { houses: d.houses, last: d.last, next: d.next, open: d.open, towns, town: d.town, plots, me };
 };

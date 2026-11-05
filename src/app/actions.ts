@@ -5,19 +5,29 @@ import { redirect } from "next/navigation";
 import { parseInstagramUsername } from "@/lib/instagram";
 import { createClient } from "@/lib/supabase/server";
 
-export type JoinState = { error: string | null };
+export type JoinState = { error: string | null; plotGone?: number };
 
 export async function joinWaitlist(_prev: JoinState, formData: FormData): Promise<JoinState> {
   const raw = formData.get("instagram");
   const parsed = parseInstagramUsername(typeof raw === "string" ? raw : "");
   if (!parsed.ok) return { error: parsed.error };
 
+  // The plot they tapped on the map, if any. The database checks it's free and in an open town.
+  const rawPlot = formData.get("plot");
+  const plot = typeof rawPlot === "string" && rawPlot !== "" ? Number(rawPlot) : null;
+  if (plot !== null && !(Number.isInteger(plot) && plot >= 1 && plot <= 1_000_000_000)) {
+    return { error: "That plot doesn't exist. Tap an empty plot on the map." };
+  }
+
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getClaims();
   if (!auth?.claims) return { error: "Your session ended. Sign in with Google again." };
 
-  // Only the username is sent. The database fills user_id, email and name from the session.
-  const { error } = await supabase.from("waitlist").insert({ instagram_username: parsed.username });
+  // Only the username (and the picked plot) is sent. The database fills user_id, email and name
+  // from the session.
+  const row: { instagram_username: string; plot?: number } = { instagram_username: parsed.username };
+  if (plot !== null) row.plot = plot;
+  const { error } = await supabase.from("waitlist").insert(row);
 
   if (error) {
     if (error.code === "23505") {
@@ -26,7 +36,16 @@ export async function joinWaitlist(_prev: JoinState, formData: FormData): Promis
         revalidatePath("/");
         return { error: null };
       }
+      if (error.message.includes("waitlist_plot_unique") && plot !== null) {
+        // Someone got there first. Refresh the map so it shows their house.
+        revalidatePath("/");
+        return { error: `Someone just took plot #${plot.toLocaleString("en")}. Pick another one.`, plotGone: plot };
+      }
       return { error: `@${parsed.username} is already on the waitlist from another Google account.` };
+    }
+    if (error.hint === "waitlist_plot_not_open" && plot !== null) {
+      revalidatePath("/");
+      return { error: "That plot isn't open yet. Pick one in the town that's filling now.", plotGone: plot };
     }
     if (error.code === "23514") return { error: "That isn't a valid Instagram username." };
 

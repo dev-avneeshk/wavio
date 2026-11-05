@@ -164,5 +164,6 @@ $$;
 revoke execute on function public.waitlist_world(integer) from public;
 grant execute on function public.waitlist_world(integer) to anon, authenticated;
 
--- Removed in v2 of this file (plot numbers now come from the plot column).
+-- Removed in older versions of this file (the map now reads waitlist_world).
 drop function if exists public.waitlist_position();
+drop function if exists public.waitlist_houses();

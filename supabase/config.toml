@@ -1,0 +1,28 @@
+# Auth settings for the hosted Supabase project "Lazy World" (ref mizgyvwszjmtgpephbli).
+# Only what's declared here is pushed; everything else stays as set in the dashboard.
+#   Preview:  supabase config diff --remote=mizgyvwszjmtgpephbli
+#   Apply:    supabase config push --remote=mizgyvwszjmtgpephbli
+project_id = "house-waitlist"
+
+[auth]
+# Where people land after signing in, and which addresses Supabase may send them back to.
+site_url = "https://wavio.codes"
+additional_redirect_urls = [
+  "https://wavio.codes/**",
+  "https://www.wavio.codes/**",
+  "https://wavio-one.vercel.app/**",
+  "https://*-avneesh7.vercel.app/**",
+  "http://localhost:3000/**",
+]
+enable_signup = true
+enable_anonymous_sign_ins = false
+
+# Google is the only way in: no email/password or magic-link sign-ups.
+[auth.email]
+enable_signup = false
+
+# Values come from supabase/.env (git-ignored).
+[auth.external.google]
+enabled = true
+client_id = "env(GOOGLE_CLIENT_ID)"
+secret = "env(GOOGLE_CLIENT_SECRET)"

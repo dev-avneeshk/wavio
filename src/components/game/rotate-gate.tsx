@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { PhoneRotateIcon } from "@/components/icons";
+import { hasTouch } from "@/lib/device";
 
 // Phones held upright. The game is made for landscape, so they're asked to turn the phone.
-const PORTRAIT_PHONE = "(pointer: coarse) and (orientation: portrait) and (max-width: 600px)";
+const PORTRAIT_PHONE = "(orientation: portrait) and (max-width: 600px)";
 const KEY = "lfc.portrait-ok";
 
 const subscribe = (fn: () => void) => {
@@ -16,7 +17,7 @@ const subscribe = (fn: () => void) => {
 export function RotateGate() {
   const portrait = useSyncExternalStore(
     subscribe,
-    () => window.matchMedia(PORTRAIT_PHONE).matches,
+    () => window.matchMedia(PORTRAIT_PHONE).matches && hasTouch(),
     () => false,
   );
   // Some people have rotation locked: they can carry on upright (remembered for this visit).

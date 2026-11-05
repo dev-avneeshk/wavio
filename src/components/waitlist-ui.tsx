@@ -61,19 +61,27 @@ export function Shell({ step, signedIn, view, startAt = null, children }: ShellP
       summary={summary}
       foldOnPhones={view.me !== null}
     >
-      <h1 className="mt-4 text-3xl font-semibold leading-[0.98] tracking-tighter text-zinc-950 md:text-[2.5rem] phone-land:mt-3 phone-land:text-2xl">
-        {site.headline}
-      </h1>
-      <p className="mt-3 text-[15px] leading-relaxed text-zinc-600 phone-land:text-sm">{site.description}</p>
+      {/* The welcome is for visitors. Signed in, the card gets straight to the point. */}
+      {!signedIn && (
+        <>
+          <h1 className="mt-4 text-3xl font-semibold leading-[0.98] tracking-tighter text-zinc-950 md:text-[2.5rem] phone-land:mt-3 phone-land:text-2xl">
+            {site.headline}
+          </h1>
+          <p className="mt-3 text-[15px] leading-relaxed text-zinc-600 phone-land:text-sm">{site.description}</p>
+        </>
+      )}
 
-      <Steps current={step} />
+      {/* Once you have a house, the steps and the sign-up notes are done with. */}
+      {!view.me && <Steps current={step} />}
 
-      <div className="mt-6">{children}</div>
+      <div className={view.me ? "mt-5 phone-land:mt-4" : "mt-6"}>{children}</div>
 
-      <div className="mt-6 flex flex-col gap-1 border-t border-zinc-200/80 pt-4 text-xs leading-relaxed text-zinc-500">
-        <p>{site.privacyNote}</p>
-        <p>{site.oneEntryNote}</p>
-      </div>
+      {!view.me && (
+        <div className="mt-6 flex flex-col gap-1 border-t border-zinc-200/80 pt-4 text-xs leading-relaxed text-zinc-500">
+          <p>{site.privacyNote}</p>
+          <p>{site.oneEntryNote}</p>
+        </div>
+      )}
     </ShellFrame>
   );
 }

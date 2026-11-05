@@ -25,6 +25,7 @@ import {
   type GameEvent,
   type StoryItem,
 } from "@/lib/game";
+import { PHONE_LAND, isPhone } from "@/lib/device";
 import { charAct, townEvents } from "@/lib/game-api";
 import { createLiveLink } from "@/lib/game-live";
 import { clearInvite, rememberInvite } from "@/lib/invite";
@@ -43,8 +44,6 @@ export type LandProps = {
   // A house to open on, from a shared link (/?h=12).
   startAt?: number | null;
 };
-
-const PHONE_LAND = "(orientation: landscape) and (max-height: 540px) and (pointer: coarse)";
 
 // The page card covers the left side of the map on wide screens and phones held sideways; tell the
 // camera how much. Collapsed, it's a small pill in the corner, so the map gets the whole width. In
@@ -72,7 +71,7 @@ const loadFeed = (town: number) => (hasSupabaseEnv ? townEvents(town) : Promise.
 
 // Phones: play full screen, turned sideways where the browser allows it (Android; iPhones can't).
 const goFullscreen = async () => {
-  if (!window.matchMedia("(pointer: coarse)").matches) return;
+  if (!isPhone()) return;
   try {
     if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
       await document.documentElement.requestFullscreen({ navigationUI: "hide" });

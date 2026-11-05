@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 /* Phones held sideways: the map takes the whole screen and the card sits at the side, like on a
-   computer, but smaller. */
-@custom-variant phone-land (@media (orientation: landscape) and (max-height: 540px) and (pointer: coarse));
+   computer, but smaller. Told apart by shape only: some phones say their pointer is a mouse.
+   Keep in step with PHONE_LAND in src/lib/device.ts. */
+@custom-variant phone-land (@media (orientation: landscape) and (max-height: 540px));
 
 @theme inline {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;

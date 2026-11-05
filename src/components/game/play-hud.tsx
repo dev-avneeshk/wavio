@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { BookIcon, CloseIcon, CoinIcon, FistIcon, HandIcon, HeartIcon, PlayIcon, WaveIcon } from "@/components/icons";
 import { decodeLook } from "@/components/people/look";
+import { useTouch } from "@/lib/device";
 import { incomeText, jobText, useGame } from "@/lib/game";
 
 const fmt = (n: number) => n.toLocaleString("en");
@@ -37,8 +38,7 @@ type HudProps = {
 // screens), and what you can do to whoever is next to you on the right.
 export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun }: HudProps) {
   const { char, near, busy } = useGame();
-  const [touch, setTouch] = useState(false);
-  useEffect(() => setTouch(window.matchMedia("(pointer: coarse)").matches), []);
+  const touch = useTouch();
   const look = char ? decodeLook(char.look) : null;
 
   return (

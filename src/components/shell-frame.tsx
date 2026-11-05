@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ChevronIcon } from "@/components/icons";
+import { PHONE_LAND } from "@/lib/device";
 
 type ShellFrameProps = {
   map: React.ReactNode;
@@ -13,8 +14,6 @@ type ShellFrameProps = {
   children: React.ReactNode;
 };
 
-const PHONE_LAND = "(orientation: landscape) and (max-height: 540px) and (pointer: coarse)";
-
 // The page layout: the map, the header, and the card, which can be collapsed to one line so the
 // map gets the screen. The card's contents stay mounted while collapsed, so a half-typed username
 // isn't lost. Computers and phones held sideways: full-screen map with the card at the side.
@@ -23,7 +22,15 @@ export function ShellFrame({ map, header, top, summary, foldOnPhones = false, ch
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    if (foldOnPhones && window.matchMedia(PHONE_LAND).matches) setCollapsed(true);
+    if (!foldOnPhones) return;
+    const mq = window.matchMedia(PHONE_LAND);
+    // Also when the phone is turned sideways later, so the card doesn't cover half the map.
+    const fold = () => {
+      if (mq.matches) setCollapsed(true);
+    };
+    fold();
+    mq.addEventListener("change", fold);
+    return () => mq.removeEventListener("change", fold);
   }, [foldOnPhones]);
 
   return (

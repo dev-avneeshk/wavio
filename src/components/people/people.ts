@@ -10,9 +10,10 @@ import type { TownFeed } from "@/lib/game-api";
 import type { LiveLink, LiveState } from "@/lib/game-live";
 import type { House } from "@/lib/world";
 import { Builder, C, T } from "../land/geo";
+import { jungleObstacles, walkClamp } from "../land/jungle";
 import { townCenter } from "../land/layout";
 import { decodeLook, lookForPlot, type Look } from "./look";
-import { KIOSK, groundY, homeOf, obstaclesOf, townBounds, type Home, type Obstacle } from "./nav";
+import { KIOSK, groundY, homeOf, obstaclesOf, type Home, type Obstacle } from "./nav";
 import { actCode, actOf, buildRig, disposeRig, poseRig, type Act, type Anim, type Gait, type Rig } from "./rig";
 import { evalPose, newPose, plansFor, type Plan, type PlanContext, type Pose } from "./timeline";
 
@@ -259,7 +260,7 @@ export class People {
       this.player = null;
       this.town = town;
       this.feedAt = -Infinity;
-      this.obstacles = obstaclesOf(town);
+      this.obstacles = [...obstaclesOf(town), ...jungleObstacles(town)];
       this.buildKiosk();
       if (this.o.link && this.owner) this.o.link.join(town);
     }
@@ -417,9 +418,7 @@ export class People {
     if (s.p === this.owner) return;
     const p = this.persons.get(s.p);
     if (!p) return;
-    const b = townBounds(this.town);
-    const x = clamp(s.x, b.minX, b.maxX);
-    const z = clamp(s.z, b.minZ, b.maxZ);
+    const [x, z] = walkClamp(this.town, s.x, s.z);
     const r = p.remote;
     if (r) Object.assign(r, { x, z, r: s.r, g: s.g, a: s.a, s: s.s, at: performance.now() });
     else p.remote = { x, z, r: s.r, g: s.g, a: s.a, s: s.s, at: performance.now(), rx: p.pose.x, rz: p.pose.z, rr: p.pose.ry, dist: 0 };
@@ -480,7 +479,19 @@ export class People {
     this.sendSoon = true;
   }
 
-  // Bump into houses, the plaza's things and the edge of town.
+  // Your person jumps somewhere (the jungle gate, back home), facing ry.
+  teleportPlayer(x: number, z: number, ry: number) {
+    const pl = this.player;
+    if (!pl) return;
+    pl.x = x;
+    pl.z = z;
+    pl.ry = ry;
+    pl.vx = pl.vz = 0;
+    this.sendSoon = true;
+  }
+
+  // Bump into houses, the plaza's things, the jungle's rocks and waterhole, and the edge of the
+  // walkable land (town, trail, clearing).
   private collide(x: number, z: number): [number, number] {
     const push = (bx: number, bz: number, hx: number, hz: number) => {
       const dx = x - bx;
@@ -496,7 +507,16 @@ export class People {
       push(b.x, b.z, b.hx, b.hz);
     }
     for (const ob of this.obstacles) {
-      if ("r" in ob) {
+      if ("rx" in ob) {
+        const dx = (x - ob.x) / ob.rx;
+        const dz = (z - ob.z) / ob.rz;
+        const dd = Math.hypot(dx, dz);
+        if (dd < 1) {
+          const k = 1 / Math.max(1e-4, dd);
+          x = ob.x + (dd < 1e-4 ? ob.rx : dx * k * ob.rx);
+          z = ob.z + (dd < 1e-4 ? 0 : dz * k * ob.rz);
+        }
+      } else if ("r" in ob) {
         const dx = x - ob.x;
         const dz = z - ob.z;
         const dd = Math.hypot(dx, dz);
@@ -507,8 +527,7 @@ export class People {
         }
       } else push(ob.x, ob.z, ob.hx, ob.hz);
     }
-    const bd = townBounds(this.town);
-    return [clamp(x, bd.minX, bd.maxX), clamp(z, bd.minZ, bd.maxZ)];
+    return walkClamp(this.town, x, z);
   }
 
   // Moves your person by the controls (dir: world direction, length up to 1). Returns how far.

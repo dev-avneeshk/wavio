@@ -9,7 +9,7 @@ import { RotateGate } from "@/components/game/rotate-gate";
 import { AwayPanel, StoryPanel } from "@/components/game/story-panel";
 import { GameToasts } from "@/components/game/toasts";
 import { useGameSession } from "@/components/game/use-game-session";
-import { ChatIcon } from "@/components/icons";
+import { ChatIcon, TreeIcon } from "@/components/icons";
 import type { PersonInfo } from "@/components/people/people";
 import { hasSupabaseEnv } from "@/lib/env";
 import {
@@ -37,6 +37,8 @@ import { TOWN_SIZE, nextPlot, parseWorldView, type WorldView } from "@/lib/world
 import { LandEngine, type Selection, type ViewInfo } from "./engine";
 import { FindHouse } from "./find-house";
 import { HousePopup } from "./house-popup";
+import type { Zone } from "./jungle";
+import { SkyChip } from "./sky-chip";
 
 export type LandProps = {
   view: WorldView;
@@ -97,6 +99,12 @@ const leaveFullscreen = () => {
 
 const fmt = (n: number) => n.toLocaleString("en");
 
+// The first time your person walks into the jungle (once per visit).
+const ZONE_NOTE: Partial<Record<Zone, string>> = {
+  trail: "Welcome to the jungle. Follow the lanterns to the waterhole.",
+  clearing: "The waterhole. Tigers, elephants and deer come here to drink.",
+};
+
 export default function LandView({ view, signedIn = false, startAt = null }: LandProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<LandEngine | null>(null);
@@ -107,6 +115,8 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
   const [info, setInfo] = useState<ViewInfo | null>(null);
   const [sel, setSel] = useState<Selection | null>(null);
   const [person, setPerson] = useState<PersonInfo | null>(null);
+  const [zone, setZone] = useState<Zone>("town");
+  const zoneSeen = useRef(new Set<Zone>());
   const chosen = useChosenPlot();
   const { unread } = useSocial();
   const { play } = useGame();
@@ -129,6 +139,15 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
         onSelectPerson: setPerson,
         onNear: (near) => patchGame({ near }),
         onPlay: (on) => setPlay(on),
+        onZone: (z) => {
+          setZone(z);
+          const note = ZONE_NOTE[z];
+          if (note && !zoneSeen.current.has(z)) {
+            zoneSeen.current.add(z);
+            toast(note, "good");
+          }
+        },
+        onAnimal: (n) => toast(n.text, "info"),
         startAt: startRef.current,
       });
     } catch (error) {
@@ -186,6 +205,7 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
   }, []);
 
   const stopPlay = useCallback(() => void engineRef.current?.setPlay(false), []);
+  const travel = useCallback((where: "jungle" | "home") => engineRef.current?.travel(where), []);
 
   const act = useCallback(
     async (kind: "fight" | "steal" | "wave") => {
@@ -306,6 +326,8 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
           onStory={() => patchGame({ storyOpen: true })}
           onStick={(x, y) => engineRef.current?.setStick(x, y)}
           onRun={(on) => engineRef.current?.setRun(on)}
+          zone={zone}
+          onTravel={travel}
         />
       ) : (
         <div className="pointer-events-none absolute inset-x-3 bottom-9 flex items-end justify-between gap-3 md:inset-x-6 md:bottom-6 phone-land:bottom-3 phone-land:right-[max(0.75rem,env(safe-area-inset-right))]">
@@ -337,6 +359,12 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
                 </span>
               </MapButton>
             )}
+            <MapButton onClick={() => void engineRef.current?.flyToJungle()} label="Show the jungle next to this town">
+              <span className="inline-flex items-center gap-1.5">
+                <TreeIcon className="size-4" />
+                Jungle
+              </span>
+            </MapButton>
             <MapButton onClick={() => engineRef.current?.flyToWorld()} label="Show every town">
               World
             </MapButton>
@@ -347,6 +375,13 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
           </div>
         </div>
       )}
+      <SkyChip
+        className={`absolute z-20 ${
+          play
+            ? "right-[max(0.5rem,env(safe-area-inset-right))] top-[3.75rem] md:right-4 md:top-[4.75rem]"
+            : "right-3 top-[4.25rem] md:right-6 md:top-[5.25rem] phone-land:right-[max(0.75rem,env(safe-area-inset-right))] phone-land:top-[3.25rem]"
+        }`}
+      />
       {me && <AwayPanel username={me.username} onPlay={startPlay} />}
       <StoryPanel />
       <RotateGate />

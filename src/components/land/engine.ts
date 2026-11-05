@@ -7,6 +7,7 @@ import { nowSec, percentText, progressOf, timeLeftText } from "@/lib/house";
 import { getChosenPlot, setChosenPlot, subscribeChosenPlot } from "@/lib/plot-choice";
 import { getPreviewName } from "@/lib/preview-name";
 import { site } from "@/lib/site";
+import { subscribeSkyPicks } from "@/lib/sky";
 import { TOWN_SIZE, housesInTown, isOpenPlot, townOf, type House, type MyHouse, type WorldView } from "@/lib/world";
 import { NameBoards } from "./boards";
 import {
@@ -29,10 +30,14 @@ import {
 import type { GameEvent } from "@/lib/game";
 import type { TownFeed } from "@/lib/game-api";
 import type { LiveLink } from "@/lib/game-live";
-import { tallThings } from "../people/nav";
+import { homeOf, tallThings } from "../people/nav";
 import { People, type Near, type PersonInfo } from "../people/people";
+import { Wildlife, type AnimalNote } from "../wild/animals";
+import { JUNGLE, buildJungle, gateSignTex, jungleOf, zoneAt, type JungleBuild, type Zone } from "./jungle";
+import { SkySystem, patchWorld } from "./sky";
 import { siteTop, specForPlot } from "./spec";
 import { SHAPES, buildCountry, buildFarTowns, extentOf, type Extent, type Inst, type Trees } from "./country";
+import { canopyGap } from "./jungle";
 import { Builder, rot } from "./geo";
 import {
   BZ,
@@ -43,6 +48,7 @@ import {
   lastTownOfRing,
   lotAtPoint,
   lotForPlot,
+  townAtCell,
   townAtPoint,
   townCenter,
   townRing,
@@ -52,10 +58,8 @@ import {
 const FONT = 'ui-rounded, "SF Pro Rounded", -apple-system, "Helvetica Neue", Arial, sans-serif';
 const SKY_FOG = "#DDE8EE";
 const SKY_R = 7000;
-const SUN = new THREE.Vector3(-0.45, 1, 0.6).normalize();
-// Light-space basis of the sun's shadow camera, used to snap its centre to whole shadow texels.
-const L_ROT = new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), SUN.clone().negate(), new THREE.Vector3(0, 1, 0));
-const L_INV = L_ROT.clone().invert();
+const UP = new THREE.Vector3(0, 1, 0);
+const ORIGIN = new THREE.Vector3(0, 0, 0);
 const PIN_SCALE = 1.15;
 const PIN_HEIGHT = (7.4 + 2.2) * PIN_SCALE;
 const SIGN = { w: 4.4, h: 2.7 };
@@ -80,38 +84,6 @@ const canvasTex = (w: number, h: number, draw: (g: CanvasRenderingContext2D) => 
   t.anisotropy = 4;
   return t;
 };
-
-const skyTex = () =>
-  canvasTex(1024, 512, (g) => {
-    const gr = g.createLinearGradient(0, 0, 0, 512);
-    gr.addColorStop(0, "#5F9FD6");
-    gr.addColorStop(0.3, "#93C0E6");
-    gr.addColorStop(0.44, "#C9DEEE");
-    gr.addColorStop(0.5, SKY_FOG);
-    gr.addColorStop(1, SKY_FOG);
-    g.fillStyle = gr;
-    g.fillRect(0, 0, 1024, 512);
-    let s = 7;
-    const r = () => (s = (s * 16807) % 2147483647) / 2147483647;
-    for (let n = 0; n < 70; n++) {
-      const x = r() * 1024;
-      const y = 150 + r() * 95;
-      const rw = 20 + r() * 60;
-      const rh = 4 + r() * 8;
-      const rg = g.createRadialGradient(x, y, 0, x, y, rw);
-      rg.addColorStop(0, "rgba(255,255,255,0.75)");
-      rg.addColorStop(1, "rgba(255,255,255,0)");
-      g.fillStyle = rg;
-      g.save();
-      g.translate(x, y);
-      g.scale(1, rh / rw);
-      g.translate(-x, -y);
-      g.beginPath();
-      g.arc(x, y, rw, 0, Math.PI * 2);
-      g.fill();
-      g.restore();
-    }
-  });
 
 // A white board with a red frame and up to four lines of text (sizes in canvas pixels).
 const boardTex = (lines: [string, number][], band = false) =>
@@ -251,6 +223,10 @@ export type LandEngineOptions = {
   onSelectPerson?: (info: PersonInfo | null) => void;
   // Someone within reach of your person while you play.
   onNear?: (near: Near) => void;
+  // Your person walked into the jungle (trail, clearing) or back into town.
+  onZone?: (zone: Zone) => void;
+  // An animal reacted to you (you got close, or tapped it).
+  onAnimal?: (note: AnimalNote) => void;
   // Play mode started or ended (also when it can't start yet).
   onPlay?: (on: boolean) => void;
 };
@@ -279,7 +255,14 @@ export class LandEngine {
   private controls: MapControls;
   private sun = new THREE.DirectionalLight("#FFF4E0", 2.1);
   private fog = new THREE.Fog(SKY_FOG, 100, 3000);
-  private sky: THREE.Mesh;
+  private hemi = new THREE.HemisphereLight("#EAF4FF", "#A3B57F", 1.5);
+  // Time of day and weather on India's clock (sky.ts, src/lib/sky.ts).
+  private sky: SkySystem;
+  private unsubSky: () => void;
+  // Light-space basis of the key light's shadow camera, used to snap its centre to whole shadow texels.
+  private lRot = new THREE.Matrix4();
+  private lInv = new THREE.Matrix4();
+  private lDir = new THREE.Vector3();
   private lam = new THREE.MeshLambertMaterial({ vertexColors: true });
   private inst = new THREE.MeshLambertMaterial({ color: "#FFFFFF" });
   private revealPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e5);
@@ -309,6 +292,15 @@ export class LandEngine {
   // Countryside and the other towns.
   private country = new THREE.Group();
   private far = new THREE.Group();
+  // The jungle next to the town drawn in detail, and its animals.
+  private jungleMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.lam);
+  private jungleSign = new THREE.Group();
+  private jungleSignMats: THREE.MeshLambertMaterial[] = [];
+  private jungle: JungleBuild | null = null;
+  private jungleKey = "";
+  private gap = 11; // spacing of the jungle canopy
+  private wild: Wildlife;
+  private zone: Zone = "town";
 
   private pin = new THREE.Group();
   private glow: THREE.Mesh;
@@ -417,19 +409,27 @@ export class LandEngine {
 
     // Lights, sky, fog
     this.scene.fog = this.fog;
-    this.scene.add(new THREE.HemisphereLight("#EAF4FF", "#A3B57F", 1.5));
+    this.scene.add(this.hemi);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(this.shadowRes, this.shadowRes);
     this.sun.shadow.camera.near = 1;
     this.sun.shadow.camera.far = 2600;
     this.sun.shadow.bias = -0.0005;
     this.scene.add(this.sun, this.sun.target);
-    this.sky = new THREE.Mesh(
-      new THREE.SphereGeometry(SKY_R, 32, 16),
-      new THREE.MeshBasicMaterial({ map: skyTex(), side: THREE.BackSide, fog: false, depthWrite: false }),
-    );
-    this.sky.renderOrder = -1;
-    this.scene.add(this.sky);
+    this.sky = new SkySystem({
+      scene: this.scene,
+      sun: this.sun,
+      hemi: this.hemi,
+      fog: this.fog,
+      lowPower: coarse,
+      reduced: this.reduced,
+      radius: SKY_R,
+    });
+    for (const m of [this.lam, this.inst, this.ownMat]) patchWorld(m, this.sky.world);
+    this.unsubSky = subscribeSkyPicks(() => {
+      this.sky.refresh(true);
+      this.wake();
+    });
 
     // Town meshes
     for (const m of [this.city, this.ownSite, this.mast, this.craneArm, this.trolley, this.cable, this.load]) {
@@ -443,7 +443,9 @@ export class LandEngine {
     this.craneTop.add(this.craneArm, this.hook);
     this.own.add(this.ownSite, this.mast, this.craneTop);
     this.own.visible = false;
-    this.scene.add(this.country, this.far, this.city, this.dash, this.xw, this.xwFar, this.own);
+    this.jungleMesh.castShadow = !coarse;
+    this.jungleMesh.receiveShadow = true;
+    this.scene.add(this.country, this.far, this.city, this.dash, this.xw, this.xwFar, this.own, this.jungleMesh, this.jungleSign);
 
     // Yellow pin + ground glow
     const ball = new THREE.Mesh(new THREE.SphereGeometry(2.2, 32, 20), this.pinMat);
@@ -491,6 +493,8 @@ export class LandEngine {
       link: opts.live ?? null,
       onNear: opts.onNear,
     });
+
+    this.wild = new Wildlife({ scene: this.scene, labels: this.labels, font: FONT, lowPower: coarse, onNote: opts.onAnimal });
 
     // Controls: drag to pan, right-drag / two fingers to rotate, wheel / pinch to zoom.
     this.controls = new MapControls(this.camera, canvas);
@@ -817,6 +821,7 @@ export class LandEngine {
     };
     for (const { hit } of this.boxes) test(hit.lot.x, hit.lot.z, hit.spec.w / 2 + 0.25, hit.spec.d / 2 + 0.25, hit.top + 0.2);
     for (const o of tallThings(this.active)) test(o.x, o.z, o.hx, o.hz, o.top);
+    if (this.zone !== "town") for (const o of this.jungle?.blockers ?? []) test(o.x, o.z, o.hx, o.hz, o.top);
     if (best >= len - 0.05) return false;
     this.camSaved.copy(cam);
     cam.copy(t).addScaledVector(dir, Math.max(1.6, best - 0.4));
@@ -879,9 +884,48 @@ export class LandEngine {
     this.flyTo(this.townView(town), 1500);
   }
 
+  // The jungle next to the town you're looking at: down over the trail to the waterhole.
+  async flyToJungle() {
+    this.select(null);
+    this.selectPerson(null);
+    const town = this.underTown || this.active || (this.me ? townOf(this.me.plot) : 1);
+    await this.activate(town);
+    if (this.disposed) return;
+    const j = jungleOf(this.active);
+    this.flyTo({ target: new THREE.Vector3(j.cx - 8, 1.5, j.cz), radius: this.portrait() ? 92 : 80, phi: 0.98, theta: -Math.PI / 2 + 0.6 }, 1700);
+  }
+
+  // Play mode: your person goes to the jungle gate, or back home to their front gate.
+  travel(where: "jungle" | "home") {
+    if (!this.playing || !this.me) return;
+    let x: number;
+    let z: number;
+    let ry: number;
+    if (where === "jungle") {
+      const j = jungleOf(this.active);
+      x = j.gateX + 2.5;
+      z = j.tz;
+      ry = Math.PI / 2;
+    } else {
+      const h = homeOf(this.me.plot);
+      x = h.gate.x;
+      z = h.gate.z;
+      ry = h.in;
+    }
+    this.people.teleportPlayer(x, z, ry);
+    const y = this.people.playerPos(this.playerAt)?.y ?? 0.3;
+    this.flyTo({ target: new THREE.Vector3(x, y + 1.4, z), radius: this.compact ? 10 : 11.5, phi: 1.1, theta: ry + Math.PI }, 700);
+  }
+
+  // Where your person is (play mode): town, the jungle trail or the clearing.
+  get playerZone(): Zone {
+    return this.zone;
+  }
+
   dispose() {
     this.disposed = true;
     this.unsubChoice();
+    this.unsubSky();
     cancelAnimationFrame(this.raf);
     this.ro.disconnect();
     this.io.disconnect();
@@ -889,6 +933,8 @@ export class LandEngine {
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("blur", this.onBlur);
     this.people.dispose();
+    this.wild.dispose();
+    this.sky.dispose();
     const canvas = this.renderer.domElement;
     canvas.removeEventListener("pointerdown", this.onPointerDown, { capture: true });
     canvas.removeEventListener("wheel", this.cancelFlight, { capture: true });
@@ -1031,7 +1077,8 @@ export class LandEngine {
 
   private rebuildCountry() {
     this.clearGroup(this.country);
-    const c = buildCountry(this.ext);
+    const c = buildCountry(this.ext, this.maxTown, this.lowPower);
+    this.gap = canopyGap(this.ext, this.lowPower);
     const ground = new THREE.Mesh(c.ground, this.lam);
     ground.receiveShadow = true;
     this.country.add(ground);
@@ -1050,6 +1097,37 @@ export class LandEngine {
     this.addInst(this.far, f.roofs, SHAPES.roof);
     this.addInst(this.far, f.cranes, SHAPES.box);
     this.addTrees(this.far, f.trees);
+    this.sky.setFarLights(f.lights);
+  }
+
+  // The jungle next to the town drawn in detail: its trail, clearing, gate sign and fireflies.
+  private rebuildJungle() {
+    const key = `${this.active}|${this.gap.toFixed(3)}|${this.maxTown}`;
+    if (key === this.jungleKey) return;
+    this.jungleKey = key;
+    const j = buildJungle(this.active, this.lowPower, this.ext, this.gap);
+    this.jungleMesh.geometry.dispose();
+    this.jungleMesh.geometry = j.geo;
+    this.jungle = j;
+    for (const o of [...this.jungleSign.children]) {
+      (o as THREE.Mesh).geometry.dispose();
+      o.removeFromParent();
+    }
+    for (const m of this.jungleSignMats) {
+      m.map?.dispose();
+      m.dispose();
+    }
+    this.jungleSignMats = [];
+    for (const side of ["town", "jungle"] as const) {
+      const map = gateSignTex(this.active, FONT, side);
+      const mat = new THREE.MeshLambertMaterial({ map, emissive: "#FFFFFF", emissiveMap: map, emissiveIntensity: 0 });
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.7, 1.42), mat);
+      sign.position.set(j.sign.x + (side === "town" ? -0.09 : 0.09), j.sign.y, j.sign.z);
+      sign.rotation.y = side === "town" ? -Math.PI / 2 : Math.PI / 2;
+      this.jungleSign.add(sign);
+      this.jungleSignMats.push(mat);
+    }
+    this.sky.setFireflies(j.flies);
   }
 
   private rebuildTown() {
@@ -1068,6 +1146,9 @@ export class LandEngine {
     this.boxes = built.houses.map((hit) => ({ hit, box: new THREE.Box3(hit.min, hit.max) }));
     this.hovered = null;
     this.boards.invalidate();
+    this.rebuildJungle();
+    this.sky.setLamps([...built.lamps, ...(this.jungle?.lamps ?? [])]);
+    this.wild.setTown(this.active);
     this.people.setTown(this.active, plots);
     if (this.personSel && !this.people.info(this.personSel)) this.selectPerson(null);
     // Keep the tapped house's card open if it's still in this town.
@@ -1210,6 +1291,17 @@ export class LandEngine {
     if (!force && key === this.lastInfo) return;
     this.lastInfo = key;
     this.opts.onView(info);
+  }
+
+  // The town whose jungle trail or clearing is under a point (0 if none).
+  private jungleTownAt(x: number, z: number) {
+    const gx = Math.round((x - JUNGLE.cx) / 1000);
+    const gz = Math.round((z - JUNGLE.cz) / 800);
+    const t = townAtCell(gx, gz);
+    if (t < 1 || t > this.maxTown) return 0;
+    const j = jungleOf(t);
+    if (Math.hypot(x - j.cx, z - j.cz) < JUNGLE.r + 70) return t;
+    return x > j.x0 - 4 && x < j.cx && Math.abs(z - j.tz) < 40 ? t : 0;
   }
 
   // ---------- town labels (shown when zoomed out) ----------
@@ -1446,6 +1538,11 @@ export class LandEngine {
     if (moved >= 6 || performance.now() - d.t >= 450) return;
     this.wake();
     const far = this.camera.position.distanceTo(this.controls.target) > LABEL_D;
+    // A tap on an animal makes it react (it has no card).
+    if (!far) {
+      this.setRay(e.clientX, e.clientY);
+      if (this.wild.poke(this.ray.ray, this.camera.position, performance.now() / 1000)) return;
+    }
     // A tap on a person or a house opens their card (the nearer one wins); anywhere else closes it.
     const hit = far ? null : this.pick(e.clientX, e.clientY);
     const person = far ? null : this.people.pick(this.ray.ray);
@@ -1659,18 +1756,21 @@ export class LandEngine {
       this.camera.far = farPlane;
       this.camera.updateProjectionMatrix();
     }
-    this.sky.scale.setScalar((farPlane * 0.45) / SKY_R);
-    this.fog.near = d * 1.6 + 60;
-    this.fog.far = d * 7 + 900;
-    this.sky.position.copy(this.camera.position);
+    this.sky.dome.scale.setScalar((farPlane * 0.45) / SKY_R);
+    this.sky.dome.position.copy(this.camera.position);
+    // The sky, the light and the weather for this moment in India (also sets the fog).
+    const skyChanging = this.sky.update(dt, now / 1000, this.camera, target, d, this.height, this.renderer.getPixelRatio());
+    const night = this.sky.world.uNight.value;
+    for (const m of this.jungleSignMats) m.emissiveIntensity = night * 0.55;
     const farView = d > 200;
     this.dash.visible = d < 520;
     this.xw.visible = !farView;
     this.xwFar.visible = farView;
 
-    // The town under the camera: draw it in detail once you've settled over it.
+    // The town under the camera: draw it in detail once you've settled over it. Over a town's
+    // jungle trail or clearing (which can sit closer to the next town), that town stays.
     if (this.view) {
-      const t = townAtPoint(target.x, target.z);
+      const t = this.jungleTownAt(target.x, target.z) || townAtPoint(target.x, target.z);
       const under = t >= 1 && t <= this.maxTown ? t : this.active;
       if (under !== this.underTown) {
         this.underTown = under;
@@ -1686,12 +1786,18 @@ export class LandEngine {
     // Sun shadow box follows the view, sized in sqrt(2) steps and snapped to texels so shadows don't swim.
     const half = Math.min(905, 45 * 2 ** (Math.ceil(2 * Math.log2(Math.max(1, (d * 1.05) / 45))) / 2));
     const texel = (2 * half) / this.shadowRes;
-    const sv = this.tmp.set(target.x, 0, target.z).applyMatrix4(L_INV);
+    const key = this.sky.keyDir;
+    if (this.lDir.distanceToSquared(key) > 1e-8) {
+      this.lDir.copy(key);
+      this.lRot.lookAt(ORIGIN, this.tmp.copy(key).negate(), UP);
+      this.lInv.copy(this.lRot).invert();
+    }
+    const sv = this.tmp.set(target.x, 0, target.z).applyMatrix4(this.lInv);
     sv.x = Math.round(sv.x / texel) * texel;
     sv.y = Math.round(sv.y / texel) * texel;
-    sv.applyMatrix4(L_ROT);
+    sv.applyMatrix4(this.lRot);
     this.sun.target.position.copy(sv);
-    this.sun.position.set(sv.x + SUN.x * 1000, sv.y + SUN.y * 1000, sv.z + SUN.z * 1000);
+    this.sun.position.set(sv.x + key.x * 1000, sv.y + key.y * 1000, sv.z + key.z * 1000);
     const sc = this.sun.shadow.camera;
     if (sc.right !== half) {
       sc.left = -half;
@@ -1706,7 +1812,7 @@ export class LandEngine {
     const camMoved = this.camera.position.distanceToSquared(this.lastCam) > 1e-6 || target.distanceToSquared(this.lastTarget) > 1e-6;
     this.lastCam.copy(this.camera.position);
     this.lastTarget.copy(target);
-    if (camMoved || this.flight || this.revealStart >= 0 || Math.abs(this.insetGoal - this.inset) > 0.5) this.idle = 0;
+    if (camMoved || skyChanging || this.flight || this.revealStart >= 0 || Math.abs(this.insetGoal - this.inset) > 0.5) this.idle = 0;
     else this.idle++;
     if (this.lowPower) {
       if (this.idle % 2 === 1) return;
@@ -1769,6 +1875,15 @@ export class LandEngine {
     this.peopleAt = now;
     this.people.update(pdt, this.camera, target, d, this.width, this.height, this.compact);
     this.placePersonPopup(d);
+
+    // The jungle's animals (they keep away from your person while you play), and where you are.
+    const player = this.playing ? this.people.playerPos(this.playerAt) : null;
+    this.wild.update(pdt, this.people.now(), this.camera, target, d, player, night, this.width, this.height);
+    const zone = player ? zoneAt(this.active, player.x, player.z) : "town";
+    if (zone !== this.zone) {
+      this.zone = zone;
+      if (player) this.opts.onZone?.(zone);
+    }
     if (this.personSel && now - this.personEmitAt > 1000) this.emitPerson();
 
     // Message bubbles over neighbours' houses.

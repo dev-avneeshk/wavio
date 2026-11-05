@@ -1,10 +1,11 @@
 // Everything outside the town you're looking at: the countryside, the sea, highways between towns,
-// and every other town in simple form. Far towns and the farmland are instanced (one shape drawn
+// the jungle round the towns (jungle.ts), and every other town in simple form. Far towns and the farmland are instanced (one shape drawn
 // many times), so a world of 100 towns and 100,000 houses still costs only a few draw calls.
 import * as THREE from "three";
 import { TOWN_SIZE, firstPlotOf } from "@/lib/world";
 import { Builder, C, T, roofTpl, type Tpl } from "./geo";
-import { CRANE } from "./build";
+import { CRANE, LAMP_HEAD } from "./build";
+import { buildCanopy, inJungle } from "./jungle";
 import { houseSpec } from "./spec";
 import {
   ASPHALT,
@@ -150,9 +151,9 @@ export type CountryBuild = {
   trees: Trees;
 };
 
-// Grass to the horizon, the beach and the sea, highways along every row and column of towns, and
-// farmland with hedgerow trees in between.
-export const buildCountry = (ext: Extent): CountryBuild => {
+// Grass to the horizon, the beach and the sea, highways along every row and column of towns, the
+// jungle round the towns, and farmland with hedgerow trees beyond it.
+export const buildCountry = (ext: Extent, maxTown: number, lowPower: boolean): CountryBuild => {
   const b = new Builder();
   const fields = new Inst();
   const trees = newTrees();
@@ -200,12 +201,13 @@ export const buildCountry = (ext: Extent): CountryBuild => {
       const a = r();
       const hedge = r() < 0.28;
       const wood = r() < 0.07;
-      if (inTown(fx, fz) || nearRoad(fx, fz)) continue;
+      if (inTown(fx, fz) || nearRoad(fx, fz) || inJungle(ext, fx, fz, 46)) continue;
       fields.add(fx, 0.06, fz, 84 + a * 4, 1, 68 + a * 4, 0, C(pick(r, FIELDS)));
       if (hedge) for (let t = 0; t < 5; t++) tree(trees, fx - 40 + t * 20 + r() * 4, fz + 36.5, 1.1 + r() * 0.4, r);
       if (wood) for (let t = 0; t < 10; t++) pine(trees, fx + (r() - 0.5) * 70, fz + (r() - 0.5) * 56, 1.4 + r() * 0.8, r);
     }
 
+  buildCanopy(b, trees, ext, maxTown, lowPower);
   return { ground: b.geometry(), fields, trees };
 };
 
@@ -215,6 +217,7 @@ export type FarBuild = {
   roofs: Inst;
   cranes: Inst;
   trees: Trees;
+  lights: number[]; // a window light per house and the street lamps (x, y, z), for night
 };
 
 // Every drawn town except the one shown in detail: streets, blocks, a plaza with its two landmarks,
@@ -225,6 +228,7 @@ export const buildFarTowns = (maxTown: number, skip: number, houses: (t: number)
   const roofs = new Inst();
   const cranes = new Inst();
   const trees = newTrees();
+  const lights: number[] = [];
   const R = TOWN_RINGS;
   const walk = C(WALK);
   const lawn = C(LAWN);
@@ -252,6 +256,8 @@ export const buildFarTowns = (maxTown: number, skip: number, houses: (t: number)
         } else {
           b.add(T.quadY, cx, 0.42, cz, BX - 3.2, 1, BZ - 3.2, 0, lawn);
         }
+        if (Math.max(Math.abs(i), Math.abs(j)) <= 4)
+          for (const sx of [-1, 1]) for (const sz of [-1, 1]) lights.push(cx + sx * (BX / 2 - 0.8), 0.3 + LAMP_HEAD, cz + sz * (BZ / 2 - 0.8));
       }
 
     const n = Math.min(TOWN_SIZE, houses(t));
@@ -262,6 +268,7 @@ export const buildFarTowns = (maxTown: number, skip: number, houses: (t: number)
       const h = houseSpec(plot, lot, lot.x, lot.z);
       const wallH = Math.max(1.2, h.wallH);
       bodies.add(lot.x, Y0 + 0.4 + wallH / 2, lot.z, h.w + 0.6, wallH, h.d + 0.6, h.rot, C(h.wall));
+      if (h.stage >= 2) lights.push(lot.x, Y0 + 0.4 + wallH * 0.6, lot.z + (lot.rot === 0 ? 1 : -1) * (h.d / 2 + 0.5));
       if (h.stage === 2 && h.roof !== "flat") {
         roofs.add(lot.x, Y0 + 0.4 + h.floors * FH, lot.z, h.w + 0.6, h.rh, h.d + 0.6, h.rot, C(h.roofC));
       } else {
@@ -276,5 +283,5 @@ export const buildFarTowns = (maxTown: number, skip: number, houses: (t: number)
     }
   }
 
-  return { ground: b.geometry(), bodies, roofs, cranes, trees };
+  return { ground: b.geometry(), bodies, roofs, cranes, trees, lights };
 };

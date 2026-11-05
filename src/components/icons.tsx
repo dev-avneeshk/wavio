@@ -197,3 +197,52 @@ export function PhoneRotateIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function SunIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" />
+    </svg>
+  );
+}
+
+export function SunsetIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M7.5 16a4.5 4.5 0 0 1 9 0M3 16h2M19 16h2M12 6.5v3M5.6 9.6l1.4 1.4M18.4 9.6 17 11M3 20h18" />
+    </svg>
+  );
+}
+
+export function MoonIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10z" />
+    </svg>
+  );
+}
+
+export function RainIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M7 15.5a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 0 1 .5 7H7zM8.5 18.5l-1 2M12.5 18.5l-1 2M16.5 18.5l-1 2" />
+    </svg>
+  );
+}
+
+export function SnowIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5 12 6l2.5-1.5M9.5 19.5 12 18l2.5 1.5" />
+    </svg>
+  );
+}
+
+export function TreeIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M12 21v-5M12 3 6.5 10H9l-3.5 5h13L15 10h2.5L12 3z" />
+    </svg>
+  );
+}

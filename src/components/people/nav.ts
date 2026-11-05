@@ -327,8 +327,12 @@ export const groundY = (town: number, x: number, z: number) => {
 };
 
 // Things a player can't walk through in a town (besides houses): the plaza's fountain, towers,
-// lawns and the Job Centre, and the park ponds. Boxes (hx, hz) or circles (r), world coordinates.
-export type Obstacle = { x: number; z: number; hx: number; hz: number } | { x: number; z: number; r: number };
+// lawns and the Job Centre, and the park ponds. Boxes (hx, hz), circles (r) or ellipses (rx, rz),
+// world coordinates.
+export type Obstacle =
+  | { x: number; z: number; hx: number; hz: number }
+  | { x: number; z: number; r: number }
+  | { x: number; z: number; rx: number; rz: number };
 
 const obstacleCache = new Map<number, Obstacle[]>();
 export const obstaclesOf = (town: number): Obstacle[] => {

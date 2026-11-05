@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { BookIcon, CloseIcon, CoinIcon, FistIcon, HandIcon, HeartIcon, PlayIcon, WaveIcon } from "@/components/icons";
+import { BookIcon, CloseIcon, CoinIcon, FistIcon, HandIcon, HeartIcon, HouseGlyph, PlayIcon, TreeIcon, WaveIcon } from "@/components/icons";
+import type { Zone } from "@/components/land/jungle";
 import { decodeLook } from "@/components/people/look";
 import { useTouch } from "@/lib/device";
 import { incomeText, jobText, useGame } from "@/lib/game";
@@ -32,11 +33,13 @@ type HudProps = {
   onStory: () => void;
   onStick: (x: number, y: number) => void;
   onRun: (on: boolean) => void;
+  zone: Zone;
+  onTravel: (where: "jungle" | "home") => void;
 };
 
 // Play mode: your money, health and job at the top, the stick and run button on the left (touch
 // screens), and what you can do to whoever is next to you on the right.
-export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun }: HudProps) {
+export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun, zone, onTravel }: HudProps) {
   const { char, near, busy } = useGame();
   const touch = useTouch();
   const look = char ? decodeLook(char.look) : null;
@@ -68,6 +71,15 @@ export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun }: Hu
           </div>
         </div>
         <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+          {zone === "town" ? (
+            <HudButton onClick={() => onTravel("jungle")} label="Go to the jungle">
+              <TreeIcon className="size-[18px]" />
+            </HudButton>
+          ) : (
+            <HudButton onClick={() => onTravel("home")} label="Back home">
+              <HouseGlyph className="size-[18px]" />
+            </HudButton>
+          )}
           <HudButton onClick={onStory} label="Your story">
             <BookIcon className="size-[18px]" />
           </HudButton>

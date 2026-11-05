@@ -90,6 +90,9 @@ const addPine = (b: Adder, x: number, y: number, z: number, s: number, r: () => 
 const addBush = (b: Adder, x: number, y: number, z: number, s: number, r: () => number) =>
   b.add(T.ico, x, y + 0.7 * s, z, 1.1 * s, 0.9 * s, 1.1 * s, r() * 6, C(pick(r, LEAF)));
 
+// Lamp heads sit this far above the lamp's foot (the night glow goes there).
+export const LAMP_HEAD = 4.75;
+
 const addLamp = (b: Adder, x: number, y: number, z: number) => {
   b.add(T.cyl, x, y + 2.3, z, 0.11, 4.6, 0.11, 0, C(POLE));
   b.add(T.box, x, y + 4.75, z, 0.5, 0.4, 0.5, 0, C("#FFF3C4"));
@@ -634,10 +637,7 @@ const plazaBlock = (b: Adder) => {
     const a = (s * Math.PI) / 2;
     addBench(b, Math.cos(a) * 6.8, Y0, Math.sin(a) * 6.8, -a - Math.PI / 2);
   }
-  for (let s = 0; s < 8; s++) {
-    const a = (s * Math.PI) / 4 + Math.PI / 8;
-    addLamp(b, Math.cos(a) * 11.5, Y0, Math.sin(a) * 9.5);
-  }
+  for (const [x, y, z] of plazaLamps()) addLamp(b, x, y, z);
   for (const [x, z] of [
     [-6, -17],
     [6, -17],
@@ -647,7 +647,6 @@ const plazaBlock = (b: Adder) => {
     [26, 2],
   ] as [number, number][])
     addTree(b, x, Y0, z, 0.9, r);
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) addLamp(b, sx * (BX / 2 - 0.8), 0.3, sz * (BZ / 2 - 0.8));
   addClockTower(placed(b, -14.8, Y0, 12.5, 0.82));
   addLighthouse(placed(b, 14.8, Y0, -12.5, 1));
   [
@@ -656,6 +655,17 @@ const plazaBlock = (b: Adder) => {
     [-8.6, -7.6],
     [8.6, -7.6],
   ].forEach(([x, z], i) => addFlowerBed(placed(b, x, Y0, z, 1), 31 + i));
+};
+
+// The plaza's lamps (round the fountain, and its four corners), relative to the town centre.
+const plazaLamps = (): [number, number, number][] => {
+  const out: [number, number, number][] = [];
+  for (let s = 0; s < 8; s++) {
+    const a = (s * Math.PI) / 4 + Math.PI / 8;
+    out.push([Math.cos(a) * 11.5, Y0, Math.sin(a) * 9.5]);
+  }
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) out.push([sx * (BX / 2 - 0.8), 0.3, sz * (BZ / 2 - 0.8)]);
+  return out;
 };
 
 // Tall things in the plaza (clock tower, lighthouse), relative to the town centre, so the camera
@@ -760,6 +770,7 @@ export type TownBuild = {
   xwFar: THREE.BufferGeometry;
   own: OwnBuild | null;
   houses: HouseHit[];
+  lamps: number[]; // lamp heads (x, y, z), for their glow at night
 };
 
 // A house as far as it's got: a building site, or the finished house.
@@ -787,6 +798,8 @@ export const buildTown = (
   const houses: HouseHit[] = [];
   let own: OwnBuild | null = null;
   const R = TOWN_RINGS;
+  const lamps: number[] = [];
+  for (const [x, y, z] of plazaLamps()) lamps.push(ox + x, y + LAMP_HEAD, oz + z);
 
   for (let i = -R; i <= R; i++)
     for (let j = -R; j <= R; j++) {
@@ -827,7 +840,11 @@ export const buildTown = (
           houses.push(hitBox(house, lot, spec, addBoard(b, spec)));
         }
       if (ringOf(i, j) <= (lite ? 2 : 4))
-        for (const sx of [-1, 1]) for (const sz of [-1, 1]) addLamp(b, cx + sx * (BX / 2 - 0.8), 0.3, cz + sz * (BZ / 2 - 0.8));
+        for (const sx of [-1, 1])
+          for (const sz of [-1, 1]) {
+            addLamp(b, cx + sx * (BX / 2 - 0.8), 0.3, cz + sz * (BZ / 2 - 0.8));
+            lamps.push(cx + sx * (BX / 2 - 0.8), 0.3 + LAMP_HEAD, cz + sz * (BZ / 2 - 0.8));
+          }
     }
 
   return {
@@ -838,6 +855,7 @@ export const buildTown = (
     xwFar: xwFar.geometry(),
     own,
     houses,
+    lamps,
   };
 };
 

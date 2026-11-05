@@ -3,10 +3,12 @@
 // Plain three.js driven by its own animation loop; React only mounts it and passes data in.
 import * as THREE from "three";
 import { MapControls } from "three/examples/jsm/controls/MapControls.js";
+import { nowSec, percentText, progressOf, timeLeftText } from "@/lib/house";
 import { getChosenPlot, setChosenPlot, subscribeChosenPlot } from "@/lib/plot-choice";
 import { getPreviewName } from "@/lib/preview-name";
 import { site } from "@/lib/site";
-import { TOWN_SIZE, housesInTown, isOpenPlot, townOf, type MyHouse, type WorldView } from "@/lib/world";
+import { TOWN_SIZE, housesInTown, isOpenPlot, townOf, type House, type MyHouse, type WorldView } from "@/lib/world";
+import { NameBoards } from "./boards";
 import {
   HOOK_Y,
   LANDMARKS,
@@ -20,12 +22,11 @@ import {
   craneHeight,
   craneSpot,
   placed,
-  siteTop,
-  specForPlot,
   type HouseHit,
   type OwnBuild,
   type TownBuild,
 } from "./build";
+import { siteTop, specForPlot } from "./spec";
 import { SHAPES, buildCountry, buildFarTowns, extentOf, type Extent, type Inst, type Trees } from "./country";
 import { Builder, rot } from "./geo";
 import {
@@ -202,6 +203,9 @@ const setTagColor = (tag: Tag, bg: string) => {
   tag.arrow.style.background = bg;
 };
 
+// A town's houses by house number. The engine keeps its own copies, so it can update waves in place.
+const houseMap = (list: readonly House[]) => new Map(list.map((h) => [h.plot, { ...h }]));
+
 type View = { target: THREE.Vector3; radius: number; phi: number; theta: number };
 type Flight = {
   t0: number;
@@ -222,13 +226,22 @@ export type ViewInfo = {
   loading: boolean;
 };
 
+// The house someone tapped (the page shows its card above it).
+export type Selection = { house: House; town: number; mine: boolean };
+
 export type LandEngineOptions = {
   // Pixels on the left edge covered by the page's card (desktop), so focused things are centred in the free space.
   leftInset: () => number;
   // Fetches one town's houses (and fresh world numbers).
   loadTown: (town: number) => Promise<WorldView | null>;
   onView?: (info: ViewInfo) => void;
+  onSelect?: (sel: Selection | null) => void;
+  // A house to open the map on (from a shared link), instead of your own house.
+  startAt?: number | null;
 };
+
+// How long a message bubble stays over the sender's house.
+const BUBBLE_MS = 9000;
 
 export class LandEngine {
   private host: HTMLElement;
@@ -283,10 +296,16 @@ export class LandEngine {
   private focusTag = makeTag("#F7C631", "#2C2F34");
   private hoverTag = makeTag("#FFFFFF", "#2C2F34");
   private townTags: { t: number; tag: Tag }[] = [];
+  // Speech bubbles over houses whose owner just sent you a message.
+  private bubbles = new Map<number, { tag: Tag; until: number }>();
+  // The page's card for the tapped house; the engine keeps it above the house.
+  private popup: HTMLElement | null = null;
+  private boards: NameBoards;
+  private ownSignAt = 0;
 
   private view: WorldView | null = null;
   private me: MyHouse | null = null;
-  private towns = new Map<number, Map<number, string>>(); // town -> house number -> username
+  private towns = new Map<number, Map<number, House>>(); // town -> house number -> house
   private failed = new Map<number, number>(); // town -> when loading it last failed
   private active = 0;
   private loading = 0;
@@ -302,6 +321,8 @@ export class LandEngine {
   private revealStart = -1;
   private hovered: HouseHit | null = null;
   private selected: HouseHit | null = null;
+  private selectedPlot = 0; // kept across rebuilds of the town, so the card stays open
+  private nudgedPlot = 0; // the tapped house the view was last moved for, so its card fits above it
   private down: { x: number; y: number; t: number } | null = null;
   private raf = 0;
   private visible = true;
@@ -413,6 +434,10 @@ export class LandEngine {
     this.scene.add(this.sign, this.ownSign, this.pickMark);
     this.unsubChoice = subscribeChosenPlot(this.onChoice);
 
+    // Names on the boards in front of the houses nearest the camera.
+    this.boards = new NameBoards(coarse ? 18 : 36, FONT);
+    this.scene.add(this.boards.group);
+
     // Controls: drag to pan, right-drag / two fingers to rotate, wheel / pinch to zoom.
     this.controls = new MapControls(this.camera, canvas);
     this.controls.enableDamping = true;
@@ -452,7 +477,7 @@ export class LandEngine {
     const justJoined = !first && view.me !== null && this.me === null;
     this.view = view;
     this.me = view.me;
-    this.towns.set(view.town, new Map(view.plots));
+    this.towns.set(view.town, houseMap(view.plots));
     if (view.me) setChosenPlot(null);
     if (first || justJoined) this.active = view.town;
 
@@ -460,7 +485,12 @@ export class LandEngine {
     this.rebuildTown();
 
     const now = performance.now();
-    if (first) {
+    const start = this.opts.startAt;
+    if (first && start && start >= 1 && start <= this.maxTown * TOWN_SIZE) {
+      // Opened from a link to a house: start over its town and fly down to it.
+      this.applyView(this.townView(townOf(start)));
+      void this.flyToHouse(start);
+    } else if (first) {
       this.intro();
       if (this.me && townOf(this.me.plot) === this.active) this.startReveal(now + 300 + 2800 * 0.55);
     } else if (justJoined) {
@@ -470,9 +500,70 @@ export class LandEngine {
     this.emitInfo(true);
   }
 
+  // Fly to a house (in any town) and open its card. An empty plot is just shown.
+  async flyToHouse(plot: number, open = true) {
+    if (!Number.isInteger(plot) || plot < 1) return;
+    const town = townOf(plot);
+    this.select(null);
+    await this.activate(town);
+    if (this.disposed) return;
+    this.flyTo(this.lotView(lotForPlot(plot), false), 1400);
+    if (open) this.select(plot);
+  }
+
+  // Open (or close, with null) the card of a house in the town drawn in detail.
+  select(plot: number | null) {
+    const hit = plot ? (this.boxes.find((b) => b.hit.n === plot)?.hit ?? null) : null;
+    if (hit === this.selected) return;
+    this.selected = hit;
+    this.selectedPlot = hit?.n ?? 0;
+    this.nudgedPlot = 0;
+    this.wake();
+    this.emitSelect();
+  }
+
+  // The page's card for the tapped house; it's moved to sit above the house every frame.
+  setPopup(el: HTMLElement | null) {
+    this.popup = el;
+  }
+
+  // Someone changed a house (for example, waved at it): update the map without rebuilding it.
+  patchHouse(plot: number, patch: Partial<Pick<House, "waves">>) {
+    const houses = this.towns.get(townOf(plot));
+    const h = houses?.get(plot);
+    if (!h) return;
+    Object.assign(h, patch);
+    if (this.me?.plot === plot) Object.assign(this.me, patch);
+    this.boards.invalidate();
+    if (this.selected?.n === plot) this.emitSelect();
+  }
+
+  // A speech bubble over a house for a few seconds (a neighbour's new message).
+  showBubble(plot: number, text: string) {
+    if (townOf(plot) !== this.active || !this.boxes.some((b) => b.hit.n === plot)) return;
+    let b = this.bubbles.get(plot);
+    if (!b) {
+      const tag = makeTag("#FFFFFF", "#2C2F34");
+      sizeTag(tag, this.compact);
+      tag.pill.style.maxWidth = this.compact ? "56vw" : "260px";
+      this.labels.insertBefore(tag.el, this.focusTag.el);
+      b = { tag, until: 0 };
+      this.bubbles.set(plot, b);
+    }
+    const short = text.length > 70 ? `${text.slice(0, 68)}…` : text;
+    setTagText(b.tag, short);
+    b.until = performance.now() + BUBBLE_MS;
+    this.wake();
+  }
+
+  private emitSelect() {
+    const h = this.selected;
+    this.opts.onSelect?.(h ? { house: { ...h.house }, town: h.lot.town, mine: this.me?.plot === h.n } : null);
+  }
+
   // Fly to your house, or to the next free plot if you don't have one yet.
   async flyToFocus() {
-    this.selected = null;
+    this.select(null);
     const f = this.focus;
     if (!f) return;
     await this.activate(f.lot.town);
@@ -488,7 +579,7 @@ export class LandEngine {
 
   // Look at one whole town from above.
   async flyToTown(town: number) {
-    this.selected = null;
+    this.select(null);
     await this.activate(town);
     if (this.disposed) return;
     this.flyTo(this.townView(town), 1500);
@@ -524,6 +615,8 @@ export class LandEngine {
     this.renderer.forceContextLoss();
     canvas.remove();
     this.labels.remove();
+    this.boards.dispose();
+    this.popup = null;
   }
 
   // ---------- data -> scene ----------
@@ -594,7 +687,7 @@ export class LandEngine {
   private updateFocus() {
     const me = this.me;
     if (me) {
-      const { lot, spec } = specForPlot(me.plot);
+      const { lot, spec } = specForPlot(me.plot, progressOf(me));
       this.focus = { lot, n: me.plot, baseY: siteTop(spec) - 1.6, own: true };
     } else {
       const n = this.chosen() ?? this.next();
@@ -663,10 +756,10 @@ export class LandEngine {
   private rebuildTown() {
     if (!this.active) return;
     this.wake();
-    const plots = this.towns.get(this.active) ?? new Map<number, string>();
+    const plots = this.towns.get(this.active) ?? new Map<number, House>();
     const mine = this.me && townOf(this.me.plot) === this.active ? this.me.plot : null;
     const prev = this.built;
-    const built = buildTown(this.active, plots, mine, this.focus?.n ?? this.next(), this.lowPower);
+    const built = buildTown(this.active, plots, mine, this.focus?.n ?? this.next(), this.lowPower, nowSec());
     this.built = built;
     this.city.geometry = built.city;
     this.dash.geometry = built.dash;
@@ -675,7 +768,13 @@ export class LandEngine {
     if (prev) for (const g of [prev.city, prev.dash, prev.xw, prev.xwFar]) g.dispose();
     this.boxes = built.houses.map((hit) => ({ hit, box: new THREE.Box3(hit.min, hit.max) }));
     this.hovered = null;
-    this.selected = null;
+    this.boards.invalidate();
+    // Keep the tapped house's card open if it's still in this town.
+    const sel = this.selectedPlot ? (this.boxes.find((b) => b.hit.n === this.selectedPlot)?.hit ?? null) : null;
+    const changed = sel !== this.selected;
+    this.selected = sel;
+    if (!sel) this.selectedPlot = 0;
+    if (changed) this.emitSelect();
     this.setOwn(built.own);
   }
 
@@ -693,39 +792,59 @@ export class LandEngine {
     this.own.position.set(o.lot.x, 0, o.lot.z);
     this.ownSite.geometry = o.site;
 
-    const side = o.n % 2 ? 1 : -1;
-    const [mx, mz] = craneSpot(o.spec, side);
-    const H = Math.max(craneHeight(o.spec.floors), o.top - Y0 + 11);
-    const geo = (fill: (b: Builder) => void) => {
-      const b = new Builder();
-      fill(b);
-      return b.geometry();
-    };
-    this.mast.geometry = geo((b) => addCraneMast(placed(b, mx, Y0, mz, 1), H));
-    this.craneArm.geometry = geo((b) => addCraneTop(b));
-    this.trolley.geometry = geo((b) => addCraneTrolley(b));
-    this.cable.geometry = geo((b) => addCraneCable(b));
-    this.load.geometry = geo((b) => addCraneLoad(b));
-    this.craneTop.position.set(mx, Y0 + H, mz);
-    // The hook works over the house's side wall on the crane's side, clear of the pin in the middle.
-    const [hx, hz] = rot(side * 4.3, 0.3, o.lot.rot);
-    this.crane = { H, base: Math.atan2(-(hz - mz), hx - mx), reach: Math.hypot(hx - mx, hz - mz), top: o.top };
-    this.poseCrane(0);
+    // The crane stays until the house is finished.
+    this.mast.visible = this.craneTop.visible = o.spec.stage < 3;
+    if (o.spec.stage < 3) {
+      const side = o.n % 2 ? 1 : -1;
+      const [mx, mz] = craneSpot(o.spec, side);
+      const H = Math.max(craneHeight(o.spec.floors), o.top - Y0 + 11);
+      const geo = (fill: (b: Builder) => void) => {
+        const b = new Builder();
+        fill(b);
+        return b.geometry();
+      };
+      this.mast.geometry = geo((b) => addCraneMast(placed(b, mx, Y0, mz, 1), H));
+      this.craneArm.geometry = geo((b) => addCraneTop(b));
+      this.trolley.geometry = geo((b) => addCraneTrolley(b));
+      this.cable.geometry = geo((b) => addCraneCable(b));
+      this.load.geometry = geo((b) => addCraneLoad(b));
+      this.craneTop.position.set(mx, Y0 + H, mz);
+      // The hook works over the house's side wall on the crane's side, clear of the pin in the middle.
+      const [hx, hz] = rot(side * 4.3, 0.3, o.lot.rot);
+      this.crane = { H, base: Math.atan2(-(hz - mz), hx - mx), reach: Math.hypot(hx - mx, hz - mz), top: o.top };
+      this.poseCrane(0);
+    }
 
     const [sx, sz] = rot(-3.4, o.spec.d / 2 + 2.6, o.lot.rot);
     this.ownSign.position.set(o.lot.x + sx, Y0, o.lot.z + sz);
     this.ownSign.rotation.y = o.lot.rot + 0.25;
     this.ownSign.scale.setScalar(1.25);
-    const name = `@${this.me?.username ?? "you"}`;
+    this.drawOwnSign();
+  }
+
+  // Your big sign: how far your house is, your name, and when it's done. Redrawn now and then.
+  private drawOwnSign() {
+    const o = this.built?.own;
+    const me = this.me;
+    if (!o || !me) return;
+    this.ownSignAt = performance.now();
+    const now = nowSec();
+    const p = progressOf(me, now);
+    const name = `@${me.username}`;
+    const nameLine: [string, number] = [name, name.length > 16 ? 56 : 72];
+    const where = `HOUSE #${fmt(o.n)} · ${site.townName(o.lot.town).toUpperCase()}`;
     this.ownSignMat.map?.dispose();
-    this.ownSignMat.map = boardTex(
-      [
-        ["BEING BUILT", 104],
-        [name, name.length > 16 ? 56 : 72],
-        [`HOUSE #${fmt(o.n)} · ${site.townName(o.lot.town).toUpperCase()}`, 52],
-      ],
-      true,
-    );
+    this.ownSignMat.map =
+      p >= 1
+        ? boardTex([["MOVE-IN READY", 96], nameLine, [where, 50]])
+        : boardTex(
+            [
+              [`BEING BUILT · ${percentText(p)}`, 84],
+              nameLine,
+              [`${timeLeftText(me.done, now).toUpperCase()} · ${where}`, 40],
+            ],
+            true,
+          );
     this.ownSignMat.needsUpdate = true;
   }
 
@@ -761,9 +880,9 @@ export class LandEngine {
         this.emitInfo();
         return;
       }
-      this.towns.set(v.town, new Map(v.plots));
-      if (v.last !== this.view.last) {
-        this.view = { ...this.view, houses: v.houses, last: v.last, towns: v.towns };
+      this.towns.set(v.town, houseMap(v.plots));
+      if (v.last !== this.view.last || v.next !== this.view.next || v.open !== this.view.open) {
+        this.view = { ...this.view, houses: v.houses, last: v.last, next: v.next, open: v.open, towns: v.towns };
         this.updateWorld();
       }
     }
@@ -836,10 +955,16 @@ export class LandEngine {
   private focusView(): View {
     const f = this.focus;
     if (!f) return this.townView(1);
-    const front = f.lot.rot === 0 ? 0 : Math.PI;
-    const target = new THREE.Vector3(f.lot.x, Y0 + (f.own ? 3 : 1.5), f.lot.z);
-    const radius = f.own ? (this.portrait() ? 74 : 80) : this.portrait() ? 64 : 70;
-    const [ox, oz] = townCenter(f.lot.town);
+    return this.lotView(f.lot, f.own);
+  }
+
+  // big: frame a whole house with its crane (your own); otherwise a bit closer, for a plot or a
+  // neighbour's house with its name board.
+  private lotView(lot: Lot, big: boolean): View {
+    const front = lot.rot === 0 ? 0 : Math.PI;
+    const target = new THREE.Vector3(lot.x, Y0 + (big ? 3 : 1.5), lot.z);
+    const radius = big ? (this.portrait() ? 74 : 80) : this.portrait() ? 64 : 70;
+    const [ox, oz] = townCenter(lot.town);
     const tries: [number, number][] = [];
     for (const phi of [0.98, 0.8]) for (const off of [0.42, -0.42, 0.9, -0.9, 1.3, -1.3]) tries.push([phi, front + off]);
     const clear = tries.find(([phi, theta]) => !this.blocked(target, radius, phi, theta, ox, oz)) ?? [0.62, front + 0.42];
@@ -1014,9 +1139,12 @@ export class LandEngine {
     const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y);
     if (moved >= 6 || performance.now() - d.t >= 450) return;
     this.wake();
-    this.selected = this.pick(e.clientX, e.clientY);
-    if (this.selected) return;
-    if (this.camera.position.distanceTo(this.controls.target) > LABEL_D) {
+    const far = this.camera.position.distanceTo(this.controls.target) > LABEL_D;
+    // A tap on a house opens its card; a tap anywhere else closes it.
+    const hit = far ? null : this.pick(e.clientX, e.clientY);
+    this.select(hit?.n ?? null);
+    if (hit) return;
+    if (far) {
       // Zoomed out, a tap on a town flies there.
       const t = this.pickTown(e.clientX, e.clientY);
       if (t) void this.flyToTown(t);
@@ -1085,6 +1213,70 @@ export class LandEngine {
     if (this.inset > 0.5) this.camera.setViewOffset(w, h, -this.inset / 2, 0, w, h);
     else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
+  }
+
+  // The tapped house's card sits above the house, kept on screen (clear of the header, the map
+  // buttons and the page's card). --arrow-x tells it where to point its little arrow.
+  private placePopup(d: number) {
+    const el = this.popup;
+    if (!el) return;
+    const h = this.selected;
+    const hide = () => {
+      if (el.style.visibility !== "hidden") el.style.visibility = "hidden";
+    };
+    if (!h || d > LABEL_D * 1.2) return hide();
+    const v = this.tmp.set(h.lot.x, h.top + 0.8, h.lot.z).project(this.camera);
+    if (v.z > 1 || v.z < -1) return hide();
+    const px = ((v.x + 1) / 2) * this.width;
+    const py = ((1 - v.y) / 2) * this.height;
+    if (px < -40 || px > this.width + 40 || py < -40 || py > this.height + 40) return hide();
+    const w = el.offsetWidth;
+    const ht = el.offsetHeight;
+    // No room above the house (common on phones): glide the view so the house sits lower, once
+    // per tap, rather than covering the house with its own card.
+    if (ht > 0 && py - ht - 16 < 60 && !this.flight && this.nudgedPlot !== h.n) {
+      this.nudgedPlot = h.n;
+      this.nudgeDown(h, Math.min(ht + 16 + 72, this.height - 96));
+    }
+    const minX = 8 + (this.insetGoal > 0.5 ? this.insetGoal : 0);
+    const left = clamp(px - w / 2, minX, Math.max(minX, this.width - w - 8));
+    const top = clamp(py - ht - 16, 60, Math.max(60, this.height - ht - 64));
+    el.style.visibility = "visible";
+    el.style.transform = `translate3d(${left.toFixed(1)}px, ${top.toFixed(1)}px, 0)`;
+    el.style.setProperty("--arrow-x", `${clamp(px - left, 18, w - 18).toFixed(1)}px`);
+    el.dataset.arrow = Math.abs(top - (py - ht - 16)) < 2 ? "down" : "none";
+  }
+
+  // Move the view straight ahead (same zoom and angle) until the top of house h is at screen
+  // height needY, found by trying positions on a copy of the camera.
+  private nudgeDown(h: HouseHit, needY: number) {
+    const target = this.controls.target.clone();
+    const offset = this.camera.position.clone().sub(target);
+    const fwd = target.clone().sub(this.camera.position).setY(0);
+    if (fwd.lengthSq() < 1e-6) return;
+    fwd.normalize();
+    const cam = this.camera.clone();
+    const point = new THREE.Vector3(h.lot.x, h.top + 0.8, h.lot.z);
+    const t = new THREE.Vector3();
+    const yAt = (s: number) => {
+      t.copy(target).addScaledVector(fwd, s);
+      cam.position.copy(t).add(offset);
+      cam.lookAt(t);
+      cam.updateMatrixWorld();
+      const v = point.clone().project(cam);
+      return ((1 - v.y) / 2) * this.height;
+    };
+    let lo = 0;
+    let hi = offset.length() * 0.8;
+    if (yAt(hi) < needY) lo = hi;
+    else
+      for (let i = 0; i < 16; i++) {
+        const mid = (lo + hi) / 2;
+        if (yAt(mid) < needY) lo = mid;
+        else hi = mid;
+      }
+    const s = new THREE.Spherical().setFromVector3(offset);
+    this.flyTo({ target: target.addScaledVector(fwd, hi), radius: s.radius, phi: s.phi, theta: s.theta }, 600);
   }
 
   private placeTag(tag: { el: HTMLDivElement }, x: number, y: number, z: number, show: boolean, opacity = 1) {
@@ -1229,10 +1421,13 @@ export class LandEngine {
       this.glow.scale.set(pulse, pulse, 1);
       const who = f.own ? this.me?.username ?? "you" : getPreviewName() || "???";
       const house = this.compact ? `#${fmt(f.n)}` : `House #${fmt(f.n)}`;
+      const myP = f.own && this.me ? progressOf(this.me) : 0;
       const sub = this.compact
         ? ""
         : f.own
-          ? `Being built · ${site.townName(f.lot.town)}`
+          ? myP >= 1
+            ? `Move-in ready · ${site.townName(f.lot.town)}`
+            : `${percentText(myP)} built · ${timeLeftText(this.me?.done ?? 0)}`
           : `${site.townName(f.lot.town)} · ${getChosenPlot() === f.n ? "your pick" : "available"}`;
       setTagText(this.focusTag, `@${who} · ${house}`, sub);
       // Fade it out as the camera pulls up into the world view, so town labels take over.
@@ -1240,11 +1435,32 @@ export class LandEngine {
       this.placeTag(this.focusTag, f.lot.x, baseY + bob + PIN_HEIGHT + 0.8, f.lot.z, true, op);
     }
 
-    // Hover (mouse) or tapped house tag.
-    const h = this.hovered ?? this.selected;
+    // Name tag over the house under the mouse (the tapped house has its card instead).
+    const h = this.hovered && this.hovered !== this.selected ? this.hovered : null;
     const showHover = Boolean(h && (!f?.own || h.n !== f.n) && d < LABEL_D);
     if (h && showHover) setTagText(this.hoverTag, `@${h.name} · #${fmt(h.n)}`);
     this.placeTag(this.hoverTag, h?.lot.x ?? 0, (h?.top ?? 0) + 1.2, h?.lot.z ?? 0, showHover);
+
+    // The tapped house's card, kept above the house and inside the free part of the screen.
+    this.placePopup(d);
+
+    // Message bubbles over neighbours' houses.
+    for (const [plot, b] of this.bubbles) {
+      const hit = this.boxes.find((x) => x.hit.n === plot)?.hit;
+      const left = b.until - now;
+      if (!hit || left <= 0) {
+        b.tag.el.remove();
+        this.bubbles.delete(plot);
+        continue;
+      }
+      const op = Math.min(1, left / 600) * clamp(1 - (d - LABEL_D) / 300, 0, 1);
+      this.placeTag(b.tag, hit.lot.x, hit.top + (this.selected?.n === plot ? 1.2 : 2.6), hit.lot.z, true, op);
+    }
+    if (this.bubbles.size) this.idle = 0;
+
+    // Writing on the name boards near the camera; your own sign is refreshed once a minute.
+    this.boards.update(this.built?.houses ?? [], this.camera.position, target, d, now);
+    if (this.built?.own && now - this.ownSignAt > 60_000) this.drawOwnSign();
 
     // Town labels when zoomed out.
     const labelOp = clamp((d - LABEL_D) / 350, 0, 1);

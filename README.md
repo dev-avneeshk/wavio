@@ -9,7 +9,12 @@ A one-page waitlist on top of a 3D world of towns (the "Lazy Films City" land fr
 - **A town:** house #1 is on Founders' Row facing the central plaza, and the town fills outward ring by ring. House numbers never change (deleting someone leaves their plot empty; nobody moves).
 - **Picking a plot:** before claiming, people can tap any empty plot in the town that's filling now (the pin, the PLOT sign and the "Claim house #N" button move there). If they don't pick, they get the next free plot. The pick survives the trip to Google's sign-in page. The database checks it: a plot someone else took first, or one in a town that isn't open yet, is refused with a clear message. Town 2 only opens once all 1,000 plots in Town 1 are taken.
 - **Phones:** smaller one-line tags, town names only when zoomed out, a lighter town, and fewer redraws while nothing moves.
-- **Being built:** every house on the waitlist shows as a building site (foundations, walls, timber frame, scaffolding, roof going on). How far along it is and its colours come from the house number, so a house always looks the same. Your own house builds up from the ground when you open the page and has a crane working on it.
+- **Build times:** a house takes 30 days from joining, 2 days less for every friend who joins from the owner's link, 3 days at the least (`waitlist_build_days()` in the schema; the wording is in `src/lib/house.ts`). Houses on the map show their real stage: foundation, frame, walls, roof, finishing, then a finished house with windows, a door, a garden and no scaffolding. Colours and shape come from the house number, so a house always looks the same. Your own house builds up from the ground when you open the page and has a crane working on it until it's done.
+- **Name boards:** every house has a board in its front yard with the owner's `@username`, house number, waves and how far it's built. Only the boards near the camera get writing (to save memory); zoom in to read them.
+- **House cards:** tap a house to open its card above it. The `@username` opens their Instagram. The card shows the stage, % built, time left, its value (in-game coins, not money: nearer the plaza, bigger, more built, Town 1, the first 100 houses and waves all add value) and waves, with buttons to wave (once a day per house), message (neighbours only) and share.
+- **Links and invites:** `/?h=12` opens the map on house 12 with its card open. Someone who joins after opening it counts as house 12's invite (remembered in the browser for 30 days, so it survives Google sign-in). Your card has your link and a Share button.
+- **Neighbours and chat:** neighbours are houses in the same town at most 42 m apart (4 plots along the street, the row behind, and across the road; usually 8-15 houses). Only neighbours can message each other, one to one, and only the two of them can read it. New messages arrive live (Supabase Realtime), pop up as a bubble over the sender's house, and the inbox is also checked every 30 s in case live updates are blocked. Limits: 280 characters, 5 messages per 15 s, 300 a day. Anyone can block a neighbour.
+- **Search:** the magnifier on the map finds a house by `@username` (the start of it is enough) or `#number` and flies there.
 - **The map:** the town you're looking at is drawn in full detail; all other towns are drawn simply. Zoom out (or press **World**) to see every town with its label, and tap a town to fly there.
 - **Rules:** one entry per Google account, one entry per Instagram username. Only a valid Instagram username is accepted (1-30 characters; letters, numbers, `.` and `_`; no link, no spaces, no email, no leading/trailing or double period). The form checks it, the server checks it again, and the database refuses anything else.
 - **Wording:** all page text is in `src/lib/site.ts`.
@@ -30,7 +35,8 @@ You'll do 4 things: create the Supabase project, create the table, set up Google
 
 1. In the project, open **SQL Editor** (left sidebar) and click **New query**.
 2. Open `supabase/schema.sql` from this project, copy all of it, paste it into the editor, and click **Run**.
-3. You should see "Success. No rows returned". Open **Table Editor** and you'll see an empty `waitlist` table.
+3. Do the same with `supabase/lots.sql` (where every plot sits, used to check who counts as a neighbour).
+4. You should see "Success. No rows returned". Open **Table Editor** and you'll see an empty `waitlist` table.
 
 ### Step 3. Put your Supabase keys in the project
 
@@ -123,23 +129,36 @@ Open http://localhost:3000, click **Continue with Google**, pick an account, ent
 | "Couldn't save your spot" or "Couldn't load your house" | The table is probably missing. Run `supabase/schema.sql` again. The exact error is in the terminal running `npm run dev`. |
 | The map shows no houses even though people joined | Run the latest `supabase/schema.sql` again (it adds the `plot` column and the `waitlist_world` function the map reads). |
 | The map says it needs WebGL | That browser has 3D graphics turned off. Joining still works. |
+| Every message says "You can only message houses within 4 plots of yours" | `supabase/lots.sql` hasn't been run, so the database doesn't know where plots are. Run it. |
+| Messages only show up after a few seconds | Live updates aren't connected (the inbox check every 30 s still works). In Supabase -> **Database -> Publications**, `supabase_realtime` must include `messages`; running `schema.sql` adds it. |
 
 ## Project layout
 
 ```
-supabase/schema.sql             table, security rules, house numbers, the map's data function
+supabase/schema.sql             tables, security rules, house numbers, build times, waves, messages, the map's data function
+supabase/lots.sql               where each of a town's 1,000 plots sits (for the neighbour check)
 src/app/page.tsx                loads the world + the visitor's state and picks what to show
 src/app/actions.ts              join the waitlist / sign out (server side)
 src/app/auth/callback/route.ts  finishes Google sign-in
 src/proxy.ts                    keeps the login session fresh
 src/lib/instagram.ts            Instagram username rules
-src/lib/world.ts                town size (1,000) and house number -> town maths
+src/lib/world.ts                town size (1,000), house number -> town maths, the map data's shape
+src/lib/house.ts                build times in words (stage, % built, time left), Instagram and house links
+src/lib/social.ts               shared chat state (inbox, chat window) for the map, chat and card
+src/lib/social-api.ts           waves, messages, blocking and search calls, with error wording
+src/lib/invite.ts               remembers the house link someone came from
 src/lib/site.ts                 all page wording (and town names)
 src/components/waitlist-ui.tsx  the card (steps, sign-in, Instagram form, your house)
+src/components/my-house-status.tsx  your build progress, value, invite link, neighbours button
+src/components/chat/            the neighbour chat window and its live updates
 src/components/land/layout.ts   where towns sit in the world, the town grid, plot numbering
-src/components/land/build.ts    builds one town in detail: plaza, parks, plots, building sites, cranes
+src/components/land/spec.ts     each house's look and stage, its value, who your neighbours are
+src/components/land/build.ts    builds one town in detail: plaza, parks, plots, houses, name boards, cranes
+src/components/land/boards.ts   the writing on the name boards near the camera
 src/components/land/country.ts  countryside, sea, highways, and every other town in simple form
-src/components/land/engine.ts   3D scene, camera, pin, signs, name tags, town labels, switching towns
+src/components/land/engine.ts   3D scene, camera, pin, signs, tags, bubbles, the house card's position, switching towns
+src/components/land/house-popup.tsx  the card over a tapped house
+src/components/land/find-house.tsx   search by @username or #number
 ```
 
 The previous portfolio is saved in git under the tag `portfolio-backup-2026-11-05` (`git checkout portfolio-backup-2026-11-05` to look at it).

@@ -4,7 +4,8 @@
 import * as THREE from "three";
 import { TOWN_SIZE, firstPlotOf } from "@/lib/world";
 import { Builder, C, T, roofTpl, type Tpl } from "./geo";
-import { CRANE, houseSpec } from "./build";
+import { CRANE } from "./build";
+import { houseSpec } from "./spec";
 import {
   ASPHALT,
   BX,

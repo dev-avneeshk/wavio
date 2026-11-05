@@ -2,11 +2,15 @@ import { signOut } from "@/app/actions";
 import { GoogleButton } from "@/components/google-button";
 import { CheckIcon, HouseGlyph, PaintRollerIcon } from "@/components/icons";
 import { InstagramForm } from "@/components/instagram-form";
+import { InviteNote } from "@/components/invite-note";
 import { Land } from "@/components/land/land";
+import { neighboursOf } from "@/components/land/spec";
+import { MyHouseStatus } from "@/components/my-house-status";
 import { PlotChoiceNote } from "@/components/plot-choice-note";
 import { ShellFrame } from "@/components/shell-frame";
+import { progressOf } from "@/lib/house";
 import { site } from "@/lib/site";
-import { TOWN_SIZE, nextPlot, plotInTown, townOf, type MyHouse, type WorldView } from "@/lib/world";
+import { TOWN_SIZE, nextPlot, plotInTown, townOf, type House, type MyHouse, type WorldView } from "@/lib/world";
 
 const fmt = (n: number) => n.toLocaleString("en");
 
@@ -14,13 +18,14 @@ type ShellProps = {
   step: number;
   signedIn: boolean;
   view: WorldView;
+  startAt?: number | null; // a house to open the map on, from a shared link
   children: React.ReactNode;
 };
 
-export function Shell({ step, signedIn, view, children }: ShellProps) {
+export function Shell({ step, signedIn, view, startAt = null, children }: ShellProps) {
   const next = nextPlot(view);
   const summary = view.me
-    ? `House #${fmt(view.me.plot)} · being built in ${site.townName(townOf(view.me.plot))}`
+    ? `House #${fmt(view.me.plot)} · ${progressOf(view.me) >= 1 ? "finished" : "being built"} in ${site.townName(townOf(view.me.plot))}`
     : `${site.headline.replace(/\.$/, "")} · #${fmt(next)} is next`;
 
   const header = (
@@ -45,7 +50,7 @@ export function Shell({ step, signedIn, view, children }: ShellProps) {
   );
 
   return (
-    <ShellFrame map={<Land view={view} />} header={header} top={<Counter view={view} />} summary={summary}>
+    <ShellFrame map={<Land view={view} signedIn={signedIn} startAt={startAt} />} header={header} top={<Counter view={view} />} summary={summary}>
       <h1 className="mt-4 text-3xl font-semibold leading-[0.98] tracking-tighter text-zinc-950 md:text-[2.5rem]">
         {site.headline}
       </h1>
@@ -116,6 +121,7 @@ export function SignInPanel({ authFailed, nextPlot }: { authFailed: boolean; nex
       )}
       <GoogleButton />
       <p className="text-sm text-zinc-500">Next you&apos;ll add your Instagram, and the plot is yours.</p>
+      <InviteNote />
       <PlotChoiceNote nextPlot={nextPlot} />
     </div>
   );
@@ -127,14 +133,17 @@ export function JoinPanel({ email, nextPlot }: { email: string | null; nextPlot:
       <p className="text-sm text-zinc-500">
         Signed in as <span className="font-medium text-zinc-800">{email ?? "your Google account"}</span>
       </p>
+      <InviteNote />
       <InstagramForm nextPlot={nextPlot} />
     </div>
   );
 }
 
-export function OnListPanel({ me, email }: { me: MyHouse; email: string | null }) {
+export function OnListPanel({ me, email, houses }: { me: MyHouse; email: string | null; houses: readonly House[] }) {
   const joined = new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(me.createdAt));
   const town = site.townName(townOf(me.plot));
+  const done = progressOf(me) >= 1;
+  const neighbours = neighboursOf(me.plot, houses).length;
 
   return (
     <div className="flex flex-col gap-5">
@@ -143,15 +152,23 @@ export function OnListPanel({ me, email }: { me: MyHouse; email: string | null }
           <p className="text-sm text-zinc-500">You&apos;re on the waitlist</p>
           <p className="mt-1 font-mono text-5xl font-semibold tracking-tight text-zinc-950">#{fmt(me.plot)}</p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-          <span className="size-1.5 animate-pulse-dot rounded-full bg-amber-500" />
-          Being built
-        </span>
+        {done ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+            <CheckIcon className="size-3.5" />
+            Finished
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+            <span className="size-1.5 animate-pulse-dot rounded-full bg-amber-500" />
+            Being built
+          </span>
+        )}
       </div>
       <p className="text-[15px] leading-relaxed text-zinc-700">
-        Your house is being built on plot {fmt(plotInTown(me.plot))} of {fmt(TOWN_SIZE)} in {town}. It&apos;s the one with
-        the crane and the yellow pin.
+        {done ? "Your house is finished" : "Your house is being built"} on plot {fmt(plotInTown(me.plot))} of {fmt(TOWN_SIZE)}{" "}
+        in {town}. It&apos;s the one with the yellow pin and your name on the big sign.
       </p>
+      <MyHouseStatus me={me} neighbours={neighbours} />
       <div className="flex items-center gap-3 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white text-zinc-700 shadow-[0_2px_6px_-3px_rgba(0,0,0,0.25)]">
           <PaintRollerIcon className="size-[18px]" />

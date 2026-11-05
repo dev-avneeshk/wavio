@@ -64,3 +64,78 @@ export function CheckIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+const stroke = {
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+};
+
+export function CloseIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+
+export function ExternalIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M14 5h5v5M19 5l-8 8M10 6H6a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-4" />
+    </svg>
+  );
+}
+
+export function ChatIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M5 18.5V6.8A1.8 1.8 0 0 1 6.8 5h10.4A1.8 1.8 0 0 1 19 6.8v7.4a1.8 1.8 0 0 1-1.8 1.8H8.6L5 18.5z" />
+    </svg>
+  );
+}
+
+export function WaveIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M8.5 11.5V6.2a1.3 1.3 0 0 1 2.6 0v4.6M11.1 10.6V4.9a1.3 1.3 0 0 1 2.6 0v5.7M13.7 10.8V6.1a1.3 1.3 0 0 1 2.6 0v6.6M8.5 11.6l-1.3-1.5a1.4 1.4 0 0 0-2.1 1.8l3.4 4.6A6 6 0 0 0 13.3 19h.4a4.6 4.6 0 0 0 4.6-4.6v-4.1a1.3 1.3 0 0 0-2.6 0" />
+    </svg>
+  );
+}
+
+export function ShareIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M12 4v11M8 8l4-4 4 4M5 13v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5" />
+    </svg>
+  );
+}
+
+export function SearchIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <circle cx="10.5" cy="10.5" r="5.5" />
+      <path d="M15 15l4.5 4.5" />
+    </svg>
+  );
+}
+
+export function BackIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M14.5 6l-6 6 6 6" />
+    </svg>
+  );
+}
+
+export function SendIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M5 12l14-7-5 14-2.5-5.5L5 12z" />
+    </svg>
+  );
+}

@@ -19,14 +19,20 @@ export async function joinWaitlist(_prev: JoinState, formData: FormData): Promis
     return { error: "That plot doesn't exist. Tap an empty plot on the map." };
   }
 
+  // The house whose link they came from, if any. The database drops it if that house doesn't exist.
+  const rawInvite = formData.get("invite");
+  const invite = typeof rawInvite === "string" && rawInvite !== "" ? Number(rawInvite) : null;
+  const invitedBy = invite !== null && Number.isInteger(invite) && invite >= 1 && invite <= 1_000_000_000 ? invite : null;
+
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getClaims();
   if (!auth?.claims) return { error: "Your session ended. Sign in with Google again." };
 
-  // Only the username (and the picked plot) is sent. The database fills user_id, email and name
-  // from the session.
-  const row: { instagram_username: string; plot?: number } = { instagram_username: parsed.username };
+  // Only the username, the picked plot and the invite are sent. The database fills user_id, email
+  // and name from the session.
+  const row: { instagram_username: string; plot?: number; invited_by?: number } = { instagram_username: parsed.username };
   if (plot !== null) row.plot = plot;
+  if (invitedBy !== null && invitedBy !== plot) row.invited_by = invitedBy;
   const { error } = await supabase.from("waitlist").insert(row);
 
   if (error) {

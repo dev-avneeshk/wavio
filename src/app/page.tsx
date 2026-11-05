@@ -11,11 +11,18 @@ import { createClient } from "@/lib/supabase/server";
 import { emptyWorld, nextPlot, parseWorldView } from "@/lib/world";
 
 type HomeProps = {
-  searchParams: Promise<{ error?: string | string[] }>;
+  searchParams: Promise<{ error?: string | string[]; h?: string | string[] }>;
+};
+
+// ?h=12 opens the map on house 12 (shared and invite links).
+const housePlot = (raw: string | string[] | undefined) => {
+  const n = Number(Array.isArray(raw) ? raw[0] : raw);
+  return Number.isInteger(n) && n >= 1 && n <= 1_000_000_000 ? n : null;
 };
 
 export default async function Home({ searchParams }: HomeProps) {
-  const { error: errorParam } = await searchParams;
+  const { error: errorParam, h } = await searchParams;
+  const startAt = housePlot(h);
 
   if (!hasSupabaseEnv) {
     return (
@@ -37,7 +44,7 @@ export default async function Home({ searchParams }: HomeProps) {
   if (!claims) {
     const shown = view ?? emptyWorld;
     return (
-      <Shell step={0} signedIn={false} view={shown}>
+      <Shell step={0} signedIn={false} view={shown} startAt={startAt}>
         <SignInPanel authFailed={errorParam === "auth"} nextPlot={nextPlot(shown)} />
       </Shell>
     );
@@ -55,15 +62,15 @@ export default async function Home({ searchParams }: HomeProps) {
 
   if (!view.me) {
     return (
-      <Shell step={1} signedIn view={view}>
+      <Shell step={1} signedIn view={view} startAt={startAt}>
         <JoinPanel email={email} nextPlot={nextPlot(view)} />
       </Shell>
     );
   }
 
   return (
-    <Shell step={2} signedIn view={view}>
-      <OnListPanel me={view.me} email={email} />
+    <Shell step={2} signedIn view={view} startAt={startAt}>
+      <OnListPanel me={view.me} email={email} houses={view.plots} />
     </Shell>
   );
 }

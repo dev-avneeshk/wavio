@@ -1,15 +1,25 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChatWindow } from "@/components/chat/chat-window";
+import { useSocialLive } from "@/components/chat/use-social-live";
+import { ChatIcon } from "@/components/icons";
 import { hasSupabaseEnv } from "@/lib/env";
+import { clearInvite, rememberInvite } from "@/lib/invite";
 import { useChosenPlot } from "@/lib/plot-choice";
 import { site } from "@/lib/site";
+import { onFlyRequest, onIncoming, openChat, useSocial } from "@/lib/social";
 import { createClient } from "@/lib/supabase/client";
 import { TOWN_SIZE, nextPlot, parseWorldView, type WorldView } from "@/lib/world";
-import { LandEngine, type ViewInfo } from "./engine";
+import { LandEngine, type Selection, type ViewInfo } from "./engine";
+import { FindHouse } from "./find-house";
+import { HousePopup } from "./house-popup";
 
 export type LandProps = {
   view: WorldView;
+  signedIn?: boolean;
+  // A house to open on, from a shared link (/?h=12).
+  startAt?: number | null;
 };
 
 // The page card covers the left side of the map on wide screens; tell the camera how much.
@@ -34,31 +44,47 @@ const loadTown = async (town: number): Promise<WorldView | null> => {
 
 const fmt = (n: number) => n.toLocaleString("en");
 
-export default function LandView({ view }: LandProps) {
+export default function LandView({ view, signedIn = false, startAt = null }: LandProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<LandEngine | null>(null);
+  const popupEl = useRef<HTMLDivElement | null>(null);
+  const startRef = useRef(startAt);
   const [failed, setFailed] = useState(false);
   const [info, setInfo] = useState<ViewInfo | null>(null);
+  const [sel, setSel] = useState<Selection | null>(null);
   const chosen = useChosenPlot();
+  const { unread } = useSocial();
+  const me = view.me;
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     let engine: LandEngine;
     try {
-      engine = new LandEngine(host, { leftInset: cardInset, loadTown, onView: setInfo });
+      engine = new LandEngine(host, {
+        leftInset: cardInset,
+        loadTown,
+        onView: setInfo,
+        onSelect: setSel,
+        startAt: startRef.current,
+      });
     } catch (error) {
       console.error("[land] WebGL unavailable:", error);
       setFailed(true);
       return;
     }
     engineRef.current = engine;
+    engine.setPopup(popupEl.current);
     // Re-centre the camera when the card is collapsed or opened.
     const card = document.getElementById("waitlist-card");
     const ro = card ? new ResizeObserver(() => engine.relayout()) : null;
     if (card) ro?.observe(card);
+    const offFly = onFlyRequest((plot) => void engine.flyToHouse(plot));
+    const offMsg = onIncoming((m) => engine.showBubble(m.from, m.body));
     return () => {
       ro?.disconnect();
+      offFly();
+      offMsg();
       engineRef.current = null;
       engine.dispose();
     };
@@ -67,6 +93,26 @@ export default function LandView({ view }: LandProps) {
   useEffect(() => {
     engineRef.current?.setData(view);
   }, [view]);
+
+  // Someone opened a house's link: if they join, that house gets the invite.
+  useEffect(() => {
+    if (me) clearInvite();
+    else if (startAt) rememberInvite(startAt);
+  }, [me, startAt]);
+
+  useSocialLive(me);
+
+  const popupRef = useCallback((el: HTMLDivElement | null) => {
+    popupEl.current = el;
+    engineRef.current?.setPopup(el);
+  }, []);
+  const closePopup = useCallback(() => engineRef.current?.select(null), []);
+  const message = useCallback((plot: number) => {
+    engineRef.current?.select(null);
+    openChat(plot);
+  }, []);
+  const waved = useCallback((plot: number, waves: number) => engineRef.current?.patchHouse(plot, { waves }), []);
+  const fly = useCallback((plot: number) => void engineRef.current?.flyToHouse(plot), []);
 
   if (failed) return <LandFallback />;
 
@@ -83,11 +129,22 @@ export default function LandView({ view }: LandProps) {
   return (
     <div className="absolute inset-0">
       <div ref={hostRef} className="absolute inset-0 touch-none select-none" />
+      <HousePopup
+        sel={sel}
+        me={me}
+        signedIn={signedIn}
+        popupRef={popupRef}
+        onClose={closePopup}
+        onMessage={message}
+        onWaved={waved}
+      />
+      {me && <ChatWindow me={me} houses={view.plots} onShow={fly} />}
       <div className="pointer-events-none absolute inset-x-3 bottom-9 flex items-end justify-between gap-3 md:inset-x-6 md:bottom-6">
-        <p className="hidden rounded-full bg-white/80 px-3 py-1.5 text-xs font-medium text-zinc-600 shadow-[0_4px_14px_-6px_rgba(0,0,0,0.3)] backdrop-blur md:ml-auto md:block">
-          {info?.zoomedOut ? "Tap a town to fly there." : "Drag to move. Right-drag to turn. Zoom out to see every town."}
+        <p className="hidden rounded-full bg-white/80 px-3 py-1.5 text-xs font-medium text-zinc-600 shadow-[0_4px_14px_-6px_rgba(0,0,0,0.3)] backdrop-blur lg:ml-auto lg:block">
+          {info?.zoomedOut ? "Tap a town to fly there." : "Tap a house to see who lives there. Drag to move, right-drag to turn."}
         </p>
-        <div className="pointer-events-auto ml-auto flex flex-wrap justify-end gap-2 md:ml-0">
+        <div className="pointer-events-auto ml-auto flex flex-wrap items-end justify-end gap-2 lg:ml-0">
+          {hasSupabaseEnv && <FindHouse onFound={fly} />}
           {info && townLabel && (
             // Phones: left out, to keep text off the map (zoom out to see town names).
             <MapButton
@@ -98,11 +155,24 @@ export default function LandView({ view }: LandProps) {
               {townLabel}
             </MapButton>
           )}
+          {me && (
+            <MapButton onClick={() => openChat(null)} label={unread ? `Chat, ${unread} unread` : "Chat with neighbours"}>
+              <span className="inline-flex items-center gap-1.5">
+                <ChatIcon className="size-4" />
+                Chat
+                {unread > 0 && (
+                  <span className="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-white">
+                    {unread > 99 ? "99+" : unread}
+                  </span>
+                )}
+              </span>
+            </MapButton>
+          )}
           <MapButton onClick={() => engineRef.current?.flyToWorld()} label="Show every town">
             World
           </MapButton>
           <MapButton strong onClick={() => void engineRef.current?.flyToFocus()}>
-            {view.me ? "My house" : `Plot #${fmt(chosen ?? nextPlot(view))}`}
+            {me ? "My house" : `Plot #${fmt(chosen ?? nextPlot(view))}`}
           </MapButton>
         </div>
       </div>

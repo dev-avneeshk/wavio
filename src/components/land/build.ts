@@ -1,31 +1,32 @@
 // Builds one town in full detail as a few merged meshes: roads, the central plaza, parks, empty
-// pegged plots, and a construction site for every house on the waitlist. A house's look and how far
-// along it is come from its house number, so it never changes. Shapes are ported from the reel.
+// pegged plots, and every house on the waitlist with its name board. A house's look comes from its
+// house number, so it never changes; how far it's built comes from its build times (spec.ts).
+// Shapes are ported from the reel.
 import * as THREE from "three";
+import { progressOf } from "@/lib/house";
+import type { House } from "@/lib/world";
 import { Builder, C, T, roofTpl, rot, type Tpl } from "./geo";
 import {
   ASPHALT,
   BX,
   BZ,
-  DOORS,
   FH,
+  GLASS,
   LAWN,
   LW,
   PER_ROW,
   PX,
   PZ,
   ROAD,
-  ROOFS,
   TOWN_HALF,
   TOWN_RINGS,
+  TRIM,
   WALK,
-  WALLS,
   Y0,
   hashStr,
   isPark,
   isPlaza,
   lotAt,
-  lotForPlot,
   pick,
   ringOf,
   rng,
@@ -33,6 +34,7 @@ import {
   type Lot,
   type Row,
 } from "./layout";
+import { BOARD, YARD, boardZ, houseSpec, siteTop, type HouseSpec } from "./spec";
 
 const LEAF = ["#5DAE45", "#6CBB4C", "#4F9F3D", "#78C257", "#64B04A"];
 const PINE = ["#3E8E4A", "#2F7D45", "#47975A"];
@@ -105,60 +107,142 @@ const addBench = (b: Adder, x: number, y: number, z: number, ry: number) => {
   P(0.9, 0.24, 0, 0.12, 0.48, 0.6, POLE);
 };
 
-// ---------- houses being built ----------
+// ---------- houses ----------
 
-type RoofKind = "gable" | "hip" | "flat";
-export type Stage = 0 | 1 | 2; // 0: foundations + frame, 1: walls going up, 2: roof going on
-
-export type HouseSpec = {
-  x: number;
-  z: number;
-  rot: number;
-  w: number;
-  d: number;
-  floors: number;
-  rh: number;
-  roof: RoofKind;
-  wall: string;
-  roofC: string;
-  door: string;
-  stage: Stage;
-  wallH: number; // how high the walls are so far
-  frameTop: number; // top of the frame / the floor being worked on
-  detail: boolean;
-};
-
-export const YARD = (d: number) => BZ / 2 - 1.6 - 8 - d / 2 - 0.6;
-
-// The same house number always gets the same house at the same stage.
-export const houseSpec = (plot: number, lot: Lot, x: number, z: number): HouseSpec => {
-  const r = rng(hashStr(`house:${plot}`));
-  const ring = lot.ring;
-  const floors = ring <= 1 ? pick(r, [2, 2, 3, 2, 3]) : ring <= 3 ? pick(r, [1, 2, 2, 2]) : pick(r, [1, 1, 2, 2]);
-  const roof: RoofKind =
-    floors === 3
-      ? r() < 0.55
-        ? "flat"
-        : "hip"
-      : pick(r, ring <= 3 ? (["gable", "gable", "hip", "flat"] as const) : (["gable", "gable", "hip"] as const));
-  const w = Math.max(7.2, LW - 1.5 - r() * 1.3);
-  const d = 7.6 + r() * 1.4;
-  const rh = roof === "gable" ? 2.5 + r() * 1.1 : roof === "hip" ? 1.8 + r() * 1.3 : 0;
-  const wall = pick(r, WALLS);
-  const roofC = pick(r, ROOFS);
-  const door = pick(r, DOORS);
-  const sr = r();
-  const stage: Stage = sr < 0.3 ? 0 : sr < 0.72 ? 1 : 2;
+// A finished house (ported from the reel): walls, windows, a door with a canopy, the roof, a path,
+// a hedge and a tree or two. Its front faces local +z.
+const addFinished = (b: Adder, h: HouseSpec, yard: number, lw: number, r: () => number) => {
+  const { x, z, rot: ry, w, d, floors, rh } = h;
+  const P = (lx: number, ly: number, lz: number, sx: number, sy: number, sz: number, col: string, tpl = T.box, extra = 0) => {
+    const [ox, oz] = rot(lx, lz, ry);
+    b.add(tpl, x + ox, Y0 + ly, z + oz, sx, sy, sz, ry + extra, C(col));
+  };
   const bodyH = floors * FH;
-  const f = stage === 0 ? 0.18 + r() * 0.22 : stage === 1 ? 0.5 + r() * 0.4 : 1;
-  const wallH = stage === 2 ? bodyH : Math.min(bodyH, Math.max(1.1, bodyH * f));
-  const frameTop = stage === 2 ? bodyH : Math.min(bodyH, (Math.floor(wallH / FH + 1e-6) + 1) * FH);
-  return { x, z, rot: lot.rot, w, d, floors, rh, roof, wall, roofC, door, stage, wallH, frameTop, detail: ring <= 2 };
+  const top = 0.4 + bodyH;
+  P(0, 0.2, 0, w + 0.5, 0.4, d + 0.5, "#CFC6B5");
+  P(0, 0.4 + bodyH / 2, 0, w, bodyH, d, h.wall);
+  if (h.detail) {
+    for (let f = 1; f < floors; f++) P(0, 0.4 + FH * f, 0, w + 0.16, 0.22, d + 0.16, TRIM);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) P((sx * w) / 2, 0.4 + bodyH / 2, (sz * d) / 2, 0.32, bodyH, 0.32, TRIM);
+  }
+  if (h.roof === "gable") {
+    P(0, top, 0, w, rh * 0.97, d, h.wall, roofTpl(0.5));
+    P(0, top - 0.12, 0, w + 0.3, 0.26, d + 0.3, TRIM);
+    const half = d / 2;
+    const Ls = Math.hypot(rh, half);
+    const a = Math.atan2(rh, half);
+    const len = Ls + 0.8;
+    for (const sgn of [1, -1]) {
+      const lz = sgn * ((half / Ls) * (len / 2) + (rh / Ls) * 0.16) - sgn * 0.02;
+      const ly = top + rh - (rh / Ls) * (len / 2) + (half / Ls) * 0.16;
+      const [ox, oz] = rot(0, lz, ry);
+      b.addE(T.box, x + ox, Y0 + ly, z + oz, w + 0.9, 0.32, len, sgn * a, ry, 0, C(h.roofC));
+    }
+    P(0, top + rh + 0.12, 0, w + 0.95, 0.24, 0.5, h.roofC);
+  } else if (h.roof === "hip") {
+    const rw = w + 0.9;
+    const rd = d + 0.9;
+    P(0, top - 0.12, 0, w + 0.3, 0.26, d + 0.3, TRIM);
+    P(0, top, 0, rw, rh, rd, h.roofC, roofTpl(Math.max(0, 0.5 - (0.5 * rd) / rw)));
+  } else {
+    P(0, top + 0.12, 0, w + 0.7, 0.36, d + 0.7, TRIM);
+    P(0, top + 0.42, 0, w + 0.5, 0.3, d + 0.5, h.roofC);
+  }
+  if (h.chimney && h.roof !== "flat") {
+    P(w * 0.28, top + rh * 0.5 + 0.6, -d * 0.14, 0.9, rh + 1.2, 0.9, "#9C6B52");
+    P(w * 0.28, top + rh + 1.25, -d * 0.14, 1.1, 0.22, 1.1, "#7E5644");
+  }
+  const du = w > 9.6 ? -w * 0.2 : -w * 0.16;
+  const nF = Math.max(2, Math.floor((w - 1) / 2.5));
+  const nS = Math.max(1, Math.floor((d - 1) / 3.3));
+  const us = (n: number, span: number) => Array.from({ length: n }, (_, k) => (k - (n - 1) / 2) * (span / n));
+  const win = (face: "F" | "B" | "L" | "R", u: number, ly: number) => {
+    const ext = face === "F" ? 0 : face === "B" ? Math.PI : face === "L" ? -Math.PI / 2 : Math.PI / 2;
+    const off = face === "F" || face === "B" ? d / 2 : w / 2;
+    const L = (uu: number, nn: number): [number, number] => rot(uu, off + nn, ext);
+    if (h.detail) {
+      const q = (uu: number, nn: number, yy: number, sx: number, sy: number, sz: number, col: string) => {
+        const [lx, lz] = L(uu, nn);
+        P(lx, yy, lz, sx, sy, sz, col, T.box, ext);
+      };
+      q(u, 0.05, ly, 1.5, 1.75, 0.14, TRIM);
+      q(u, 0.09, ly, 1.16, 1.4, 0.1, GLASS);
+      q(u, 0.14, ly, 0.09, 1.4, 0.04, TRIM);
+      q(u, 0.14, ly + 0.1, 1.16, 0.09, 0.04, TRIM);
+      q(u, 0.13, ly - 0.93, 1.75, 0.14, 0.3, TRIM);
+    } else {
+      const [lx, lz] = L(u, 0.03);
+      P(lx, ly, lz, 1.4, 1.6, 1, TRIM, T.quadZ, ext);
+      const [gx, gz] = L(u, 0.05);
+      P(gx, ly, gz, 1.08, 1.28, 1, GLASS, T.quadZ, ext);
+    }
+  };
+  for (let f = 0; f < floors; f++) {
+    const ly = 0.4 + FH * f + 1.6;
+    for (const u of us(nF, w)) {
+      if (!(f === 0 && Math.abs(u - du) < 1.6)) win("F", u, ly);
+      if (h.detail || f > 0) win("B", u, ly);
+    }
+    for (const u of us(h.detail ? nS : 1, d)) {
+      win("L", u, ly);
+      win("R", u, ly);
+    }
+  }
+  if (h.detail) {
+    P(du, 0.4 + 1.27, d / 2 + 0.05, 1.55, 2.55, 0.14, TRIM);
+    P(du, 0.4 + 1.17, d / 2 + 0.1, 1.15, 2.3, 0.1, h.door);
+    P(du + 0.38, 0.4 + 1.15, d / 2 + 0.17, 0.12, 0.12, 0.06, "#E8C35A");
+    const [ox, oz] = rot(du, d / 2 + 0.55, ry);
+    b.addE(T.box, x + ox, Y0 + 0.4 + 2.85, z + oz, 2.3, 0.14, 1.15, 0.32, ry, 0, C(h.roofC));
+  } else {
+    P(du, 0.4 + 1.15, d / 2 + 0.04, 1.1, 2.2, 1, h.door, T.quadZ);
+  }
+  P(du, 0.15, d / 2 + 0.55, 1.8, 0.3, 0.9, "#D6CFC2");
+  if (yard > 1) P(du, 0.03, d / 2 + 0.6 + yard / 2, 1.3, 0.06, yard, WALK);
+  if (h.hedge && yard > 2.5) {
+    for (const sg of [-1, 1]) {
+      const a = sg < 0 ? -lw / 2 + 0.5 : du + 0.95;
+      const e = sg < 0 ? du - 0.95 : lw / 2 - 0.5;
+      if (e - a > 1) P((a + e) / 2, 0.5, d / 2 + yard - 0.4, e - a, 1.0, 0.85, HEDGE);
+    }
+  }
+  const tp = (lx: number, lz: number): [number, number] => {
+    const [ox, oz] = rot(lx, lz, ry);
+    return [x + ox, z + oz];
+  };
+  if (h.tree === 1 && yard > 3) {
+    const [tx, tz] = tp(Math.min(w * 0.28, lw / 2 - 1.8), d / 2 + Math.min(3.2, yard * 0.5));
+    addTree(b, tx, Y0, tz, 0.95 + r() * 0.2, r);
+  } else if (h.tree === 2 && yard > 3) {
+    for (const sg of [-1, 1]) {
+      const [tx, tz] = tp(sg * Math.min(w * 0.36, lw / 2 - 1.4), d / 2 + Math.min(2.4, yard * 0.4));
+      addPine(b, tx, Y0, tz, 0.85 + r() * 0.2, r);
+    }
+  }
+  if (r() < 0.45) {
+    const [tx, tz] = tp((r() - 0.5) * w * 0.7, -d / 2 - 3.2);
+    addTree(b, tx, Y0, tz, 0.9 + r() * 0.3, r);
+  }
 };
 
-// Highest point of a house site (roof ridge, or the scaffold's guard rail).
-export const siteTop = (h: HouseSpec) =>
-  Y0 + 0.4 + (h.stage === 2 ? h.floors * FH + (h.roof === "flat" ? 0.9 : h.rh + 0.3) : h.frameTop + 1.0);
+export type BoardSpot = { x: number; y: number; z: number; ry: number };
+
+// The name board in the front yard: two posts and a white board with a red frame. The owner's name
+// is drawn on it by the map (only for the boards near the camera). Returns where the board's face is.
+export const addBoard = (b: Adder, h: HouseSpec): BoardSpot => {
+  const { x, z, rot: ry } = h;
+  const bz = boardZ(h.d);
+  const P = (lx: number, ly: number, lz: number, sx: number, sy: number, sz: number, col: string) => {
+    const [ox, oz] = rot(lx, lz, ry);
+    b.add(T.box, x + ox, Y0 + ly, z + oz, sx, sy, sz, ry, C(col));
+  };
+  const { w: bw, h: bh, y: by, x: bx } = BOARD;
+  for (const s of [-1, 1]) P(bx + s * (bw / 2 - 0.25), (by + bh / 2) / 2, bz - 0.09, 0.12, by + bh / 2, 0.12, "#7A4E2D");
+  P(bx, by, bz, bw + 0.14, bh + 0.14, 0.08, "#C24038");
+  P(bx, by, bz + 0.045, bw, bh, 0.02, "#FFFFFF");
+  const [ox, oz] = rot(bx, bz + 0.062, ry);
+  return { x: x + ox, y: Y0 + by, z: z + oz, ry };
+};
 
 // Evenly spaced positions from -span/2 to span/2, at most `gap` apart.
 const spread = (span: number, gap: number) => {
@@ -238,7 +322,7 @@ const addSite = (b: Adder, h: HouseSpec, yard: number, lw: number, r: () => numb
   }
   if (wallH >= 2.4) P(du, 0.4 + 1.12, d / 2 + 0.03, 1.1, 2.2, 1, HOLE, T.quadZ);
 
-  // Roof going on: rafters, a ridge beam, and part of one slope already covered.
+  // Roof going on: rafters, a ridge beam, and as much of the covering as is done (h.roofCover).
   if (h.stage === 2) {
     const top = 0.4 + bodyH;
     if (h.roof === "flat") {
@@ -246,7 +330,7 @@ const addSite = (b: Adder, h: HouseSpec, yard: number, lw: number, r: () => numb
       P(0, top + 0.3, -d / 2 + 0.12, w, 0.6, 0.24, h.wall);
       P(-w / 2 + 0.12, top + 0.3, 0, 0.24, 0.6, d, h.wall);
       P(w / 2 - 0.12, top + 0.3, 0, 0.24, 0.6, d, h.wall);
-      const cw = w * (0.35 + r() * 0.4);
+      const cw = (w - 0.4) * Math.min(1, Math.max(0.08, h.roofCover));
       P(-w / 2 + cw / 2 + 0.2, 0.4 + bodyH + 0.04, 0, cw, 1, d - 0.5, h.roofC, T.quadY);
     } else {
       const half = d / 2;
@@ -261,12 +345,18 @@ const addSite = (b: Adder, h: HouseSpec, yard: number, lw: number, r: () => numb
         }
       }
       P(0, top + rh, 0, w + 0.3, 0.24, 0.24, TIMBER);
-      if (r() < 0.75) {
-        const cw = w * (0.35 + r() * 0.45);
-        const sgn = r() < 0.5 ? 1 : -1;
+      // One slope is covered first, then the other, each from the left end.
+      const first = r() < 0.5 ? 1 : -1;
+      const cover = Math.min(1, Math.max(0, h.roofCover));
+      for (const [sgn, part] of [
+        [first, Math.min(1, cover * 2)],
+        [-first, Math.max(0, cover * 2 - 1)],
+      ] as [number, number][]) {
+        if (part < 0.04) continue;
+        const cw = (w + 0.3) * part;
         const lift = 0.19; // half a rafter + half a board, along the slope's normal
-        const [ox, oz] = rot(-w / 2 + cw / 2, sgn * (half / 2 + (lift * rh) / Ls), ry);
-        b.addE(T.box, x + ox, Y0 + top + rh / 2 + (lift * half) / Ls, z + oz, cw + 0.3, 0.16, Ls + 0.5, sgn * a, ry, 0, C(h.roofC));
+        const [ox, oz] = rot(-(w + 0.3) / 2 + cw / 2, sgn * (half / 2 + (lift * rh) / Ls), ry);
+        b.addE(T.box, x + ox, Y0 + top + rh / 2 + (lift * half) / Ls, z + oz, cw, 0.16, Ls + 0.5, sgn * a, ry, 0, C(h.roofC));
       }
     }
   }
@@ -645,14 +735,17 @@ const emptyLot = (b: Builder, lot: Lot, clear: boolean) => {
 export type HouseHit = {
   n: number;
   name: string;
+  house: House;
   lot: Lot;
+  spec: HouseSpec;
   min: THREE.Vector3;
   max: THREE.Vector3;
   top: number;
+  board: BoardSpot | null; // null for your own house (it has the big sign instead)
 };
 
 export type OwnBuild = {
-  site: THREE.BufferGeometry; // the house being built, around its own origin
+  site: THREE.BufferGeometry; // your house, around its own origin
   n: number;
   lot: Lot;
   spec: HouseSpec;
@@ -669,14 +762,20 @@ export type TownBuild = {
   houses: HouseHit[];
 };
 
-// plots: house number -> Instagram username, for this town. mine / focus are house numbers (focus =
-// the plot with the pin, kept clear of trees). lite: fewer pieces per site, for phones.
+// A house as far as it's got: a building site, or the finished house.
+const addAnyHouse = (b: Adder, spec: HouseSpec, r: () => number) =>
+  spec.stage === 3 ? addFinished(b, spec, YARD(spec.d), LW, r) : addSite(b, spec, YARD(spec.d), LW, r);
+
+// plots: this town's houses by house number. mine / focus are house numbers (focus = the plot with
+// the pin, kept clear of trees). lite: fewer pieces per house, for phones. now: Unix seconds, for
+// how far each house is built.
 export const buildTown = (
   town: number,
-  plots: ReadonlyMap<number, string>,
+  plots: ReadonlyMap<number, House>,
   mine: number | null,
   focus: number,
   lite = false,
+  now = Date.now() / 1000,
 ): TownBuild => {
   const [ox, oz] = townCenter(town);
   const b = new Builder();
@@ -705,26 +804,27 @@ export const buildTown = (
       for (const row of ["S", "N"] as Row[])
         for (let k = 0; k < PER_ROW; k++) {
           const lot = lotAt(town, i, j, row, k);
-          const name = plots.get(lot.plot);
-          if (name === undefined) {
+          const house = plots.get(lot.plot);
+          if (house === undefined) {
             emptyLot(b, lot, lot.plot === focus);
             continue;
           }
+          const p = progressOf(house, now);
           if (lot.plot === mine) {
             // Your house is its own mesh (built around its own origin) so it can be built up in front of you.
             const ob = new Builder();
-            const spec = houseSpec(lot.plot, lot, 0, 0);
-            addSite(ob, spec, YARD(spec.d), LW, rng(hashStr(`site:${lot.plot}`)));
+            const spec = houseSpec(lot.plot, lot, 0, 0, p);
+            addAnyHouse(ob, spec, rng(hashStr(`site:${lot.plot}`)));
             own = { site: ob.geometry(), n: lot.plot, lot, spec, top: siteTop(spec) };
-            houses.push(hitBox(lot.plot, name, lot, spec));
+            houses.push(hitBox(house, lot, houseSpec(lot.plot, lot, lot.x, lot.z, p), null));
             continue;
           }
-          const spec = houseSpec(lot.plot, lot, lot.x, lot.z);
+          const spec = houseSpec(lot.plot, lot, lot.x, lot.z, p);
           if (lite) spec.detail = false;
           const r = rng(hashStr(`site:${lot.plot}`));
-          addSite(b, spec, YARD(spec.d), LW, r);
+          addAnyHouse(b, spec, r);
           if (spec.stage === 1 && lot.ring >= 2 && r() < 0.05) addStaticCrane(b, spec, r);
-          houses.push(hitBox(lot.plot, name, lot, spec));
+          houses.push(hitBox(house, lot, spec, addBoard(b, spec)));
         }
       if (ringOf(i, j) <= (lite ? 2 : 4))
         for (const sx of [-1, 1]) for (const sz of [-1, 1]) addLamp(b, cx + sx * (BX / 2 - 0.8), 0.3, cz + sz * (BZ / 2 - 0.8));
@@ -741,22 +841,19 @@ export const buildTown = (
   };
 };
 
-const hitBox = (n: number, name: string, lot: Lot, h: HouseSpec): HouseHit => {
+const hitBox = (house: House, lot: Lot, h: HouseSpec, board: BoardSpot | null): HouseHit => {
   const top = siteTop(h);
   const hw = h.w / 2 + 1.6;
   const hd = h.d / 2 + 1.6;
   return {
-    n,
-    name,
+    n: house.plot,
+    name: house.username,
+    house,
     lot,
+    spec: h,
     min: new THREE.Vector3(lot.x - hw, Y0, lot.z - hd),
     max: new THREE.Vector3(lot.x + hw, top, lot.z + hd),
     top,
+    board,
   };
-};
-
-// Spec of any house, for the far-away towns and for the pin over a house in another town.
-export const specForPlot = (plot: number) => {
-  const lot = lotForPlot(plot);
-  return { lot, spec: houseSpec(plot, lot, lot.x, lot.z) };
 };

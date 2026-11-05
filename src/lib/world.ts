@@ -7,7 +7,15 @@ export const townOf = (plot: number) => Math.floor((Math.max(1, plot) - 1) / TOW
 export const plotInTown = (plot: number) => ((Math.max(1, plot) - 1) % TOWN_SIZE) + 1;
 export const firstPlotOf = (town: number) => (town - 1) * TOWN_SIZE + 1;
 
-export type MyHouse = { plot: number; username: string; createdAt: string };
+// One house on the map. start / done: when building started and when it finishes (Unix seconds,
+// from the database: 30 days after joining, 2 days sooner per invited friend, 3 days at the least).
+export type House = { plot: number; username: string; start: number; done: number; waves: number };
+
+export type MyHouse = House & {
+  createdAt: string;
+  invites: number; // friends who joined with this house's invite link
+  unread: number; // unread messages from neighbours
+};
 
 // What public.waitlist_world() returns: the whole world in numbers, plus one town's houses.
 export type WorldView = {
@@ -17,7 +25,7 @@ export type WorldView = {
   open: number; // highest town you can pick a plot in (towns open one at a time, in order)
   towns: [number, number][]; // [town, houses] for towns that have houses
   town: number; // the town `plots` belongs to
-  plots: [number, string][]; // [house number, Instagram username], in house order
+  plots: House[]; // that town's houses, in house order
   me: MyHouse | null; // the signed-in visitor's own house
 };
 
@@ -33,6 +41,7 @@ export const housesInTown = (view: Pick<WorldView, "towns">, town: number) =>
   view.towns.find(([t]) => t === town)?.[1] ?? 0;
 
 const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v);
+const int = (v: unknown) => (isInt(v) ? v : 0);
 
 // Checks the JSON from the database, so a bad response can't break the page.
 export const parseWorldView = (data: unknown): WorldView | null => {
@@ -52,14 +61,26 @@ export const parseWorldView = (data: unknown): WorldView | null => {
   const towns: [number, number][] = [];
   for (const t of d.towns) if (Array.isArray(t) && isInt(t[0]) && isInt(t[1])) towns.push([t[0], t[1]]);
 
-  const plots: [number, string][] = [];
-  for (const p of d.plots) if (Array.isArray(p) && isInt(p[0]) && typeof p[1] === "string") plots.push([p[0], p[1]]);
+  const plots: House[] = [];
+  for (const p of d.plots) {
+    if (!Array.isArray(p) || !isInt(p[0]) || typeof p[1] !== "string") continue;
+    plots.push({ plot: p[0], username: p[1], start: int(p[2]), done: int(p[3]), waves: int(p[4]) });
+  }
 
   let me: MyHouse | null = null;
   if (d.me && typeof d.me === "object") {
     const m = d.me as Record<string, unknown>;
     if (isInt(m.plot) && typeof m.username === "string" && typeof m.createdAt === "string") {
-      me = { plot: m.plot, username: m.username, createdAt: m.createdAt };
+      me = {
+        plot: m.plot,
+        username: m.username,
+        createdAt: m.createdAt,
+        start: int(m.start),
+        done: int(m.done),
+        waves: int(m.waves),
+        invites: int(m.invites),
+        unread: int(m.unread),
+      };
     }
   }
 

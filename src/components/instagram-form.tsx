@@ -4,6 +4,7 @@ import { startTransition, useActionState, useEffect, useState, type FormEvent } 
 import { joinWaitlist, type JoinState } from "@/app/actions";
 import { PlotChoiceNote } from "@/components/plot-choice-note";
 import { INSTAGRAM_MAX_LENGTH, parseInstagramUsername } from "@/lib/instagram";
+import { useInvite } from "@/lib/invite";
 import { setChosenPlot, useChosenPlot } from "@/lib/plot-choice";
 import { setPreviewName } from "@/lib/preview-name";
 
@@ -16,6 +17,7 @@ export function InstagramForm({ nextPlot }: { nextPlot: number }) {
   // Hide the last server error once the user starts editing again.
   const [editedSinceSubmit, setEditedSinceSubmit] = useState(false);
   const chosen = useChosenPlot();
+  const invite = useInvite();
   const plot = chosen ?? nextPlot;
 
   const error = clientError ?? (editedSinceSubmit ? null : state.error);
@@ -44,6 +46,7 @@ export function InstagramForm({ nextPlot }: { nextPlot: number }) {
     const formData = new FormData();
     formData.set("instagram", result.username);
     if (chosen !== null) formData.set("plot", String(chosen));
+    if (invite !== null) formData.set("invite", String(invite));
     startTransition(() => submit(formData));
   }
 

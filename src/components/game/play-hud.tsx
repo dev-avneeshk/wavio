@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { BookIcon, CloseIcon, CoinIcon, FistIcon, HandIcon, HeartIcon, HouseGlyph, PlayIcon, TreeIcon, WaveIcon } from "@/components/icons";
 import type { Zone } from "@/components/land/jungle";
+import { FullscreenButton } from "@/components/game/fullscreen-button";
 import { decodeLook } from "@/components/people/look";
 import { useTouch } from "@/lib/device";
 import { incomeText, jobText, useGame } from "@/lib/game";
@@ -64,7 +65,7 @@ export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun, zone
                 <HeartIcon className={`size-3.5 ${char && char.health < 35 ? "text-rose-400" : "text-rose-300"}`} />
                 {char ? char.health : "..."}
               </span>
-              <span className="hidden sm:inline">
+              <span className="hidden sm:inline phone-land:hidden">
                 {incomeText(char?.income ?? 0)} · {jobText(char?.job ?? null)}
               </span>
             </p>
@@ -80,6 +81,7 @@ export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun, zone
               <HouseGlyph className="size-[18px]" />
             </HudButton>
           )}
+          <FullscreenButton variant="hud" />
           <HudButton onClick={onStory} label="Your story">
             <BookIcon className="size-[18px]" />
           </HudButton>
@@ -170,6 +172,7 @@ function ActButton({
 function Stick({ onStick, onRun }: { onStick: (x: number, y: number) => void; onRun: (on: boolean) => void }) {
   const base = useRef<HTMLDivElement>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const [used, setUsed] = useState(false); // the hint goes once you've used the stick
   const active = useRef<number | null>(null);
   const R = 52;
 
@@ -186,7 +189,7 @@ function Stick({ onStick, onRun }: { onStick: (x: number, y: number) => void; on
     }
     setKnob({ x: dx, y: dy });
     onStick(dx / R, -dy / R);
-    onRun(len > R * 0.92);
+    onRun(len > R * 0.85);
   };
 
   const end = (e: React.PointerEvent) => {
@@ -203,6 +206,7 @@ function Stick({ onStick, onRun }: { onStick: (x: number, y: number) => void; on
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         active.current = e.pointerId;
+        setUsed(true);
         move(e);
       }}
       onPointerMove={move}
@@ -216,9 +220,11 @@ function Stick({ onStick, onRun }: { onStick: (x: number, y: number) => void; on
         className="absolute left-1/2 top-1/2 size-14 rounded-full bg-white/85 shadow-[0_6px_16px_-6px_rgba(0,0,0,0.6)]"
         style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
       />
-      <span className="pointer-events-none absolute inset-x-0 -top-5 text-center text-[10px] font-semibold uppercase tracking-wide text-white/80 [text-shadow:0_1px_3px_rgba(0,0,0,0.6)]">
-        Push far to run
-      </span>
+      {!used && (
+        <span className="pointer-events-none absolute inset-x-0 -top-5 text-center text-[10px] font-semibold uppercase tracking-wide text-white/80 [text-shadow:0_1px_3px_rgba(0,0,0,0.6)]">
+          Push far to run
+        </span>
+      )}
     </div>
   );
 }

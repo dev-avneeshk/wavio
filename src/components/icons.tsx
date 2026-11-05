@@ -246,3 +246,28 @@ export function TreeIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function GlobeIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5S9.6 5.8 12 3.5z" />
+    </svg>
+  );
+}
+
+export function ExpandIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+    </svg>
+  );
+}
+
+export function ShrinkIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+    </svg>
+  );
+}

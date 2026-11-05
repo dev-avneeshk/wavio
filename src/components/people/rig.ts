@@ -443,6 +443,53 @@ const hipHeight = (d: Dims, th: number, kn: number) => (d.hip - d.knee) * Math.c
 const TAU = Math.PI * 2;
 const ease = (x: number) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 
+// Metres covered by one stride (two steps) at each gait. The legs move on by distance walked, so
+// these keep the feet from sliding on the ground.
+export const strideOf = (g: Gait) => (g === 3 ? 2.7 : g === 2 ? 2.0 : g === 4 ? 1.0 : 1.45);
+
+// How each gait moves (radians). th: thigh swing either side of bias (minus is forward). Knees:
+// kBase always, kStance while the foot is on the ground, kSwing at most as the leg swings through.
+// Arms: swing either side of armBias, elbow bend plus elbowSwing as the arm comes forward.
+type GaitShape = {
+  th: number;
+  bias: number;
+  kBase: number;
+  kStance: number;
+  kSwing: number;
+  arm: number;
+  armBias: number;
+  elbow: number;
+  elbowSwing: number;
+  lean: number;
+  twist: number;
+  sway: number;
+  bob: number;
+  run: boolean;
+};
+const GAITS: (GaitShape | null)[] = [
+  null,
+  // walk
+  { th: 0.4, bias: -0.04, kBase: 0.05, kStance: 0.16, kSwing: 1.05, arm: 0.34, armBias: -0.04, elbow: 0.2, elbowSwing: 0.32, lean: 0.04, twist: 0.08, sway: 0.035, bob: 0, run: false },
+  // jog
+  { th: 0.58, bias: -0.14, kBase: 0.12, kStance: 0.3, kSwing: 1.55, arm: 0.5, armBias: -0.12, elbow: 1.3, elbowSwing: 0.18, lean: 0.12, twist: 0.1, sway: 0.02, bob: 0.05, run: true },
+  // run
+  { th: 0.76, bias: -0.22, kBase: 0.15, kStance: 0.4, kSwing: 1.95, arm: 0.74, armBias: -0.16, elbow: 1.45, elbowSwing: 0.22, lean: 0.2, twist: 0.13, sway: 0.015, bob: 0.075, run: true },
+  // sneak
+  { th: 0.3, bias: -0.3, kBase: 0.5, kStance: 0.1, kSwing: 0.8, arm: 0.12, armBias: -0.5, elbow: 0.9, elbowSwing: 0, lean: 0.4, twist: 0.03, sway: 0.01, bob: 0, run: false },
+];
+
+// One knee at leg phase p (the thigh is furthest forward at p = π/2 and furthest back at 3π/2, so
+// the foot is on the ground from π/2 to 3π/2 and swings forward from 3π/2 round to π/2).
+const knee = (g: GaitShape, p: number) => {
+  const onGround = Math.cos(p) < 0;
+  // On the ground: walking, the knee gives a little just after the heel lands; running, it bends
+  // most with the foot right under the body.
+  const stance = !onGround ? 0 : g.run ? -Math.cos(p) : Math.max(0, Math.sin(2 * (p - Math.PI / 2)));
+  // Swinging through: the heel comes up behind early in the swing, then the leg straightens to land.
+  const swing = Math.max(0, Math.cos(p + (g.run ? 0.3 : 0.45)));
+  return g.kBase + g.kStance * stance + g.kSwing * swing * Math.sqrt(swing);
+};
+
 // Puts the skeleton in the pose for this moment.
 export const poseRig = (r: Rig, a: Anim) => {
   const b = r.bones;
@@ -456,29 +503,49 @@ export const poseRig = (r: Rig, a: Anim) => {
   // ----- legs and arms for moving -----
   const moving = a.gait > 0 && a.act !== "sitBench" && a.act !== "sitGround" && a.act !== "fall";
   if (moving) {
-    const s = Math.sin(a.phase * TAU);
-    const c = Math.cos(a.phase * TAU);
-    const g = [
-      null,
-      { th: 0.42, sh: 0.55, arm: 0.36, fore: -0.25, bob: 0.022, lean: 0.03 },
-      { th: 0.62, sh: 1.1, arm: 0.55, fore: -1.25, bob: 0.045, lean: 0.12 },
-      { th: 0.82, sh: 1.5, arm: 0.8, fore: -1.5, bob: 0.06, lean: 0.22 },
-      { th: 0.3, sh: 0.5, arm: 0.12, fore: -0.9, bob: 0.012, lean: 0.4 },
-    ][a.gait]!;
-    const bend = a.gait === 4 ? 0.55 : 0.06;
-    b[B.lThigh].rotation.x = -g.th * s - bend * 0.5;
-    b[B.rThigh].rotation.x = g.th * s - bend * 0.5;
-    b[B.lShin].rotation.x = bend + g.sh * Math.max(0, c);
-    b[B.rShin].rotation.x = bend + g.sh * Math.max(0, -c);
-    b[B.lUpper].rotation.x = g.arm * s - (a.gait === 4 ? 0.5 : 0);
-    b[B.rUpper].rotation.x = -g.arm * s - (a.gait === 4 ? 0.5 : 0);
-    b[B.lFore].rotation.x = g.fore;
-    b[B.rFore].rotation.x = g.fore;
+    const g = GAITS[a.gait]!;
+    const ph = a.phase * TAU;
+    const s = Math.sin(ph);
+    const c = Math.cos(ph);
+    // Each leg: thigh, then knee. The right leg is half a stride behind the left.
+    const lTh = g.bias - g.th * s;
+    const rTh = g.bias + g.th * s;
+    const lKn = knee(g, ph);
+    const rKn = knee(g, ph + Math.PI);
+    b[B.lThigh].rotation.x = lTh;
+    b[B.rThigh].rotation.x = rTh;
+    b[B.lShin].rotation.x = lKn;
+    b[B.rShin].rotation.x = rKn;
+    // Arms swing against the legs, the forearm lifting more as the arm comes forward.
+    b[B.lUpper].rotation.x = g.armBias + g.arm * s;
+    b[B.rUpper].rotation.x = g.armBias - g.arm * s;
+    b[B.lFore].rotation.x = -(g.elbow + g.elbowSwing * Math.max(0, -s));
+    b[B.rFore].rotation.x = -(g.elbow + g.elbowSwing * Math.max(0, s));
     b[B.lUpper].rotation.z = 0.07;
     b[B.rUpper].rotation.z = -0.07;
+    if (g.run) {
+      // Running arms come in a little across the body.
+      b[B.lUpper].rotation.y = -0.12;
+      b[B.rUpper].rotation.y = 0.12;
+    }
+    // Hips turn with the legs, shoulders the other way, head steady; the hips dip on the side of
+    // the swinging leg.
+    root.rotation.y = -0.5 * g.twist * s;
+    root.rotation.z = -g.sway * c;
     b[B.spine].rotation.x = g.lean;
-    b[B.spine].rotation.y = 0.06 * s * (a.gait >= 2 ? 1.6 : 1);
-    root.position.y = hipHeight(d, bend * 0.5, bend) - g.bob * 0.5 + g.bob * Math.abs(c);
+    b[B.spine].rotation.y = 1.5 * g.twist * s;
+    b[B.spine].rotation.z = 0.7 * g.sway * c;
+    b[B.head].rotation.y = -g.twist * s;
+    b[B.head].rotation.x = -0.6 * g.lean;
+    if (g.run) {
+      // Lowest with the foot under the body, up in the air between steps.
+      root.position.y = hipHeight(d, g.bias, g.kBase + g.kStance) + g.bob * (1 - Math.abs(c));
+    } else {
+      // Walking: the leg on the ground holds the hips up, so they rise over it and dip between steps
+      // (about half as much as stiff legs would, as heel and toes roll in real feet).
+      const planted = Math.max(hipHeight(d, lTh, lKn), hipHeight(d, rTh, rKn));
+      root.position.y = planted + 0.45 * (hipHeight(d, 0, 0) - planted);
+    }
   } else {
     // Standing: breathing, weight shifting from foot to foot.
     b[B.spine].rotation.x = 0.015 * Math.sin(t * 1.7);

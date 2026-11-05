@@ -3,6 +3,7 @@
 // Plain three.js driven by its own animation loop; React only mounts it and passes data in.
 import * as THREE from "three";
 import { MapControls } from "three/examples/jsm/controls/MapControls.js";
+import { isPhone } from "@/lib/device";
 import { nowSec, percentText, progressOf, timeLeftText } from "@/lib/house";
 import { getChosenPlot, setChosenPlot, subscribeChosenPlot } from "@/lib/plot-choice";
 import { getPreviewName } from "@/lib/preview-name";
@@ -385,7 +386,8 @@ export class LandEngine {
     this.host = host;
     this.opts = opts;
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const coarse = window.matchMedia("(pointer: coarse)").matches;
+    // Phones draw less (some say their pointer is a mouse, so touch and screen size count too).
+    const coarse = window.matchMedia("(pointer: coarse)").matches || isPhone();
     this.lowPower = coarse;
     this.shadowRes = coarse ? 1024 : 2048;
 
@@ -506,6 +508,7 @@ export class LandEngine {
     this.controls.minPolarAngle = 0.12;
     this.controls.maxPolarAngle = 1.22;
     this.controls.zoomToCursor = true;
+    this.onlyOwnPointers(this.controls);
 
     canvas.addEventListener("pointerdown", this.onPointerDown, { capture: true });
     canvas.addEventListener("wheel", this.cancelFlight, { capture: true, passive: true });
@@ -653,6 +656,7 @@ export class LandEngine {
       this.playing = false;
       this.keys.clear();
       this.stick = { x: 0, y: 0, run: false };
+      this.people.playing = false;
       this.mapControls();
       this.opts.onPlay?.(false);
       this.wake();
@@ -669,6 +673,7 @@ export class LandEngine {
     if (!this.people.hasPlayer()) return; // tried again once your person has appeared (frame loop)
     this.playWanted = false;
     this.playing = true;
+    this.people.playing = true;
     this.playControls();
     const p = this.people.playerPos(this.playerAt);
     if (p) {
@@ -715,8 +720,30 @@ export class LandEngine {
     this.opts.onSelectPerson?.(this.personSel ? this.people.info(this.personSel) : null);
   }
 
+  // Once a finger is down on the map, the controls listen to every finger on the page. A thumb on
+  // the stick (or a button) then counted as the camera finger, and the camera spun wildly. Only
+  // fingers that started on the map move the camera.
+  private onlyOwnPointers(c: MapControls) {
+    const ctl = c as unknown as {
+      _pointers: number[];
+      _onPointerMove: (e: PointerEvent) => void;
+      _onPointerUp: (e: PointerEvent) => void;
+    };
+    const move = ctl._onPointerMove;
+    const up = ctl._onPointerUp;
+    if (typeof move !== "function" || typeof up !== "function" || !Array.isArray(ctl._pointers)) return;
+    const own = (e: PointerEvent) => e.pointerType !== "touch" || ctl._pointers.includes(e.pointerId);
+    ctl._onPointerMove = (e) => {
+      if (own(e)) move(e);
+    };
+    ctl._onPointerUp = (e) => {
+      if (own(e)) up(e);
+    };
+  }
+
   private mapControls() {
     const c = this.controls;
+    c.rotateSpeed = 1;
     c.enablePan = true;
     c.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
     c.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
@@ -729,6 +756,8 @@ export class LandEngine {
 
   private playControls() {
     const c = this.controls;
+    // A finger across a short phone screen turned the camera a full circle; now about half.
+    c.rotateSpeed = this.lowPower || this.height < 540 ? 0.5 : 0.8;
     c.enablePan = false;
     c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
     c.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
@@ -1603,7 +1632,8 @@ export class LandEngine {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.fov = w / h < 0.9 ? 55 : 42;
-    const compact = w < 640;
+    // Small screens, including phones held sideways (wide but short): smaller and fewer tags.
+    const compact = w < 640 || h < 540;
     if (compact !== this.compact) {
       this.compact = compact;
       for (const tag of [this.focusTag, this.hoverTag, ...this.townTags.map((t) => t.tag)]) sizeTag(tag, compact);

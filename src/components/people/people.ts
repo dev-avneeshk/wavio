@@ -14,7 +14,7 @@ import { jungleObstacles, walkClamp } from "../land/jungle";
 import { townCenter } from "../land/layout";
 import { decodeLook, lookForPlot, type Look } from "./look";
 import { KIOSK, groundY, homeOf, obstaclesOf, type Home, type Obstacle } from "./nav";
-import { actCode, actOf, buildRig, disposeRig, poseRig, type Act, type Anim, type Gait, type Rig } from "./rig";
+import { actCode, actOf, buildRig, disposeRig, poseRig, strideOf, type Act, type Anim, type Gait, type Rig } from "./rig";
 import { evalPose, newPose, plansFor, type Plan, type PlanContext, type Pose } from "./timeline";
 
 type Remote = { x: number; z: number; r: number; g: number; a: number; s: number; at: number; rx: number; rz: number; rr: number; dist: number };
@@ -32,6 +32,8 @@ type Person = {
   handoff: { x: number; z: number } | null; // walking back from where a player left them
   d2: number; // squared distance to the camera's target
   shown: boolean;
+  stride: number; // leg cycle, carried on smoothly when they change from walking to running
+  strideDist: number; // pose.dist when stride was last moved on
 };
 
 type Label = { el: HTMLDivElement; name: HTMLSpanElement; money: HTMLSpanElement; doing: HTMLSpanElement; plot: number };
@@ -169,6 +171,7 @@ export class People {
 
   private owner: number | null = null; // the signed-in player's house
   private controlled = false; // in the game: the owner's person follows the owner, not the event list
+  playing = false; // play mode (camera behind your person): on small screens your own tag is left out
   private player: {
     x: number;
     z: number;
@@ -287,6 +290,8 @@ export class People {
         handoff: null,
         d2: Infinity,
         shown: false,
+        stride: 0,
+        strideDist: 0,
       });
       if (h.online) this.online.add(h.plot);
     }
@@ -566,7 +571,8 @@ export class People {
     out.x = pl.x;
     out.z = pl.z;
     out.ry = pl.ry;
-    out.gait = (sp > 3.2 ? 3 : sp > 0.25 ? 1 : 0) as Gait;
+    // Walk, then a jog while speeding up or slowing down, then a run.
+    out.gait = (sp > 3.6 ? 3 : sp > 2.3 ? 2 : sp > 0.25 ? 1 : 0) as Gait;
     out.dist = pl.dist;
     const s = now - pl.actAt;
     if (pl.act !== "none" && s <= pl.actDur) {
@@ -660,7 +666,13 @@ export class People {
         r.mesh.rotation.y = p.pose.ry;
         const a = this.anim;
         a.gait = p.pose.gait;
-        a.phase = p.pose.dist / (p.pose.gait >= 2 ? 2.2 : 1.45);
+        // The legs move on by the distance covered, one stride at a time for the gait they're in,
+        // so going from a walk into a run doesn't make the legs jump. (A big jump in distance is a
+        // new route, not walking: the legs carry on from where they were.)
+        const moved = p.pose.dist - p.strideDist;
+        if (moved > 0 && moved < 4) p.stride += moved / strideOf(p.pose.gait);
+        p.strideDist = p.pose.dist;
+        a.phase = p.stride;
         a.act = p.pose.act;
         a.actT = p.pose.actT;
         a.actDur = p.pose.actDur;
@@ -718,7 +730,7 @@ export class People {
         o.x = r.rx;
         o.z = r.rz;
         o.ry = r.rr;
-        o.gait = (r.g === 3 ? 3 : r.g > 0 ? 1 : 0) as Gait;
+        o.gait = (r.g === 3 || r.g === 2 ? r.g : r.g > 0 ? 1 : 0) as Gait;
         o.dist = r.dist;
         o.act = actOf(r.a);
         o.actT = Math.max(0, this.now() - r.s) + (o.act === "fight" ? 1.3 : 0);
@@ -807,15 +819,20 @@ export class People {
   }
 
   private placeLabels(camera: THREE.PerspectiveCamera, camDist: number, width: number, height: number, compact: boolean) {
-    this.maxLabels = compact ? 6 : 12;
+    // Small screens: a few name-only tags, so words don't cover the town; and while you play,
+    // none over your own head (your name is in the corner).
+    this.maxLabels = compact ? 4 : 12;
     if (camDist > 260) return this.hideLabels(0);
     const cam = camera.position;
-    const reach = compact ? 55 : 75;
+    const reach = compact ? 40 : 75;
+    const skipOwn = compact && this.playing;
     const cands: { p: Person; d: number }[] = [];
     for (const p of this.list) {
       if (!p.rig) continue;
+      const own = p.plot === this.owner;
+      if (own && skipOwn) continue;
       const d = Math.hypot(p.pose.x - cam.x, p.pose.z - cam.z);
-      if (d < reach || p.plot === this.owner) cands.push({ p, d: p.plot === this.owner ? -1 : d });
+      if (d < reach || own) cands.push({ p, d: own ? -1 : d });
     }
     cands.sort((a, b) => a.d - b.d);
     const shown = cands.slice(0, this.maxLabels);
@@ -827,9 +844,12 @@ export class People {
       const mine = p.plot === this.owner;
       const name = `${mine ? "You · " : ""}@${p.house.username}`;
       if (l.name.textContent !== name) l.name.textContent = name;
-      const money = `${incomeText(p.house.income)} · ${jobText(p.house.job)}`;
-      if (l.money.textContent !== money) l.money.textContent = money;
-      const doing = p.pose.label || (this.online.has(p.plot) && !mine ? "In the game now" : "");
+      const money = compact ? "" : `${incomeText(p.house.income)} · ${jobText(p.house.job)}`;
+      if (l.money.textContent !== money) {
+        l.money.textContent = money;
+        l.money.style.display = money ? "block" : "none";
+      }
+      const doing = compact ? "" : p.pose.label || (this.online.has(p.plot) && !mine ? "In the game now" : "");
       if (l.doing.textContent !== doing) {
         l.doing.textContent = doing;
         l.doing.style.display = doing ? "block" : "none";
@@ -891,7 +911,7 @@ export class People {
       x: Math.round(pl.x * 100) / 100,
       z: Math.round(pl.z * 100) / 100,
       r: Math.round(pl.ry * 100) / 100,
-      g: sp > 3.2 ? 3 : sp > 0.25 ? 1 : 0,
+      g: sp > 3.6 ? 3 : sp > 2.3 ? 2 : sp > 0.25 ? 1 : 0,
       a: acting ? actCode(pl.act) : 0,
       s: Math.round(pl.actAt * 100) / 100 || Math.round(t),
     });

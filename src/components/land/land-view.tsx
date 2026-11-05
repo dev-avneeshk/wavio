@@ -7,9 +7,10 @@ import { PersonPopup } from "@/components/game/person-popup";
 import { PlayButton, PlayHud } from "@/components/game/play-hud";
 import { RotateGate } from "@/components/game/rotate-gate";
 import { AwayPanel, StoryPanel } from "@/components/game/story-panel";
+import { FullscreenButton } from "@/components/game/fullscreen-button";
 import { GameToasts } from "@/components/game/toasts";
 import { useGameSession } from "@/components/game/use-game-session";
-import { ChatIcon, TreeIcon } from "@/components/icons";
+import { ChatIcon, GlobeIcon, HouseGlyph, TreeIcon } from "@/components/icons";
 import type { PersonInfo } from "@/components/people/people";
 import { hasSupabaseEnv } from "@/lib/env";
 import {
@@ -26,6 +27,7 @@ import {
   type StoryItem,
 } from "@/lib/game";
 import { PHONE_LAND, isPhone } from "@/lib/device";
+import { enterFullscreen } from "@/lib/fullscreen";
 import { charAct, townEvents } from "@/lib/game-api";
 import { createLiveLink } from "@/lib/game-live";
 import { clearInvite, rememberInvite } from "@/lib/invite";
@@ -70,32 +72,6 @@ const loadTown = async (town: number): Promise<WorldView | null> => {
 };
 
 const loadFeed = (town: number) => (hasSupabaseEnv ? townEvents(town) : Promise.resolve(null));
-
-// Phones: play full screen, turned sideways where the browser allows it (Android; iPhones can't).
-const goFullscreen = async () => {
-  if (!isPhone()) return;
-  try {
-    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
-    }
-  } catch {
-    // Not allowed here (iPhone Safari, in-app browsers): carry on in the page.
-  }
-  try {
-    await (screen.orientation as unknown as { lock?: (o: string) => Promise<void> }).lock?.("landscape");
-  } catch {
-    // Can't lock: the rotate prompt covers it.
-  }
-};
-
-const leaveFullscreen = () => {
-  try {
-    (screen.orientation as unknown as { unlock?: () => void }).unlock?.();
-  } catch {
-    // Nothing locked.
-  }
-  if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
-};
 
 const fmt = (n: number) => n.toLocaleString("en");
 
@@ -192,7 +168,7 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
     if (play) root.dataset.play = "1";
     else delete root.dataset.play;
     engineRef.current?.relayout();
-    if (!play) leaveFullscreen();
+    // Full screen stays on after Play ends: it's turned off with its own button (or Back / Esc).
     return () => {
       delete root.dataset.play;
     };
@@ -200,7 +176,8 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
 
   const startPlay = useCallback(() => {
     if (!getGame().ready) return;
-    void goFullscreen();
+    // Phones play full screen, without the browser's bars (where the browser allows it).
+    if (isPhone()) void enterFullscreen();
     void engineRef.current?.setPlay(true);
   }, []);
 
@@ -346,11 +323,12 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
                 {townLabel}
               </MapButton>
             )}
+            {/* Phones: icons only, to keep words off the map. */}
             {me && (
-              <MapButton onClick={() => openChat(null)} label={unread ? `Chat, ${unread} unread` : "Chat with neighbours"}>
+              <MapButton icon onClick={() => openChat(null)} label={unread ? `Chat, ${unread} unread` : "Chat with neighbours"}>
                 <span className="inline-flex items-center gap-1.5">
                   <ChatIcon className="size-4" />
-                  Chat
+                  <PhoneHidden>Chat</PhoneHidden>
                   {unread > 0 && (
                     <span className="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-white">
                       {unread > 99 ? "99+" : unread}
@@ -359,18 +337,31 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
                 </span>
               </MapButton>
             )}
-            <MapButton onClick={() => void engineRef.current?.flyToJungle()} label="Show the jungle next to this town">
+            <MapButton icon onClick={() => void engineRef.current?.flyToJungle()} label="Show the jungle next to this town">
               <span className="inline-flex items-center gap-1.5">
                 <TreeIcon className="size-4" />
-                Jungle
+                <PhoneHidden>Jungle</PhoneHidden>
               </span>
             </MapButton>
-            <MapButton onClick={() => engineRef.current?.flyToWorld()} label="Show every town">
-              World
+            <MapButton icon onClick={() => engineRef.current?.flyToWorld()} label="Show every town">
+              <span className="inline-flex items-center gap-1.5">
+                <GlobeIcon className="size-4" />
+                <PhoneHidden>World</PhoneHidden>
+              </span>
             </MapButton>
-            <MapButton strong onClick={() => void engineRef.current?.flyToFocus()}>
-              {me ? "My house" : `Plot #${fmt(chosen ?? nextPlot(view))}`}
-            </MapButton>
+            <FullscreenButton variant="map" />
+            {me ? (
+              <MapButton icon strong onClick={() => void engineRef.current?.flyToFocus()} label="My house">
+                <span className="inline-flex items-center gap-1.5">
+                  <HouseGlyph className="size-4" />
+                  <PhoneHidden>My house</PhoneHidden>
+                </span>
+              </MapButton>
+            ) : (
+              <MapButton strong onClick={() => void engineRef.current?.flyToFocus()}>
+                {`Plot #${fmt(chosen ?? nextPlot(view))}`}
+              </MapButton>
+            )}
             {me && hasSupabaseEnv && <PlayButton onPlay={startPlay} />}
           </div>
         </div>
@@ -378,8 +369,10 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
       <SkyChip
         className={`absolute z-20 ${
           play
-            ? "right-[max(0.5rem,env(safe-area-inset-right))] top-[3.75rem] md:right-4 md:top-[4.75rem]"
-            : "right-3 top-[4.25rem] md:right-6 md:top-[5.25rem] phone-land:right-[max(0.75rem,env(safe-area-inset-right))] phone-land:top-[3.25rem]"
+            ? // Phones: left out while playing, so nothing covers the game.
+              "hidden md:right-4 md:top-[4.75rem] md:block phone-land:hidden"
+            : // Phones have no header bar, so it takes the top corner.
+              "right-3 top-3 md:right-6 md:top-[5.25rem] phone-land:right-[max(0.75rem,env(safe-area-inset-right))] phone-land:top-2"
         }`}
       />
       {me && <AwayPanel username={me.username} onPlay={startPlay} />}
@@ -389,16 +382,23 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
   );
 }
 
+// Words next to a map button's icon; left out on phones.
+function PhoneHidden({ children }: { children: React.ReactNode }) {
+  return <span className="hidden md:inline phone-land:hidden">{children}</span>;
+}
+
 function MapButton({
   children,
   onClick,
   strong,
+  icon,
   label,
   className = "",
 }: {
   children: React.ReactNode;
   onClick: () => void;
   strong?: boolean;
+  icon?: boolean; // an icon, with words only on bigger screens
   label?: string;
   className?: string;
 }) {
@@ -408,7 +408,9 @@ function MapButton({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`h-10 whitespace-nowrap rounded-full px-4 text-sm font-semibold shadow-[0_6px_18px_-8px_rgba(0,0,0,0.45)] backdrop-blur transition-[transform,background-color] duration-200 active:scale-[0.97] ${
+      className={`h-10 whitespace-nowrap rounded-full text-sm font-semibold ${
+        icon ? "min-w-10 px-3 md:px-4 phone-land:px-3" : "px-4"
+      } shadow-[0_6px_18px_-8px_rgba(0,0,0,0.45)] backdrop-blur transition-[transform,background-color] duration-200 active:scale-[0.97] ${
         strong ? "bg-zinc-900 text-white hover:bg-zinc-800" : "bg-white/90 text-zinc-800 hover:bg-white"
       } ${className}`}
     >

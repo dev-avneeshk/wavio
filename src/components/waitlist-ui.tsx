@@ -26,13 +26,14 @@ type ShellProps = {
 export function Shell({ step, signedIn, view, startAt = null, children }: ShellProps) {
   const next = nextPlot(view);
   const summary = view.me
-    ? `House #${fmt(view.me.plot)} · ${progressOf(view.me) >= 1 ? "finished" : "being built"} in ${site.townName(townOf(view.me.plot))}`
+    ? `House #${fmt(view.me.plot)} · ${progressOf(view.me) >= 1 ? "finished" : "being built"}`
     : `${site.headline.replace(/\.$/, "")} · #${fmt(next)} is next`;
 
   const header = (
     <header
       id="site-header"
-      className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between p-3 md:p-6 phone-land:py-2 phone-land:pl-[max(0.75rem,env(safe-area-inset-left))] phone-land:pr-[max(0.75rem,env(safe-area-inset-right))]"
+      // Phones: no header over the map (Sign out is in the card instead).
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 hidden items-center justify-between p-6 md:flex phone-land:hidden"
     >
       <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-white/90 py-1.5 pl-1.5 pr-4 shadow-[0_6px_20px_-10px_rgba(0,0,0,0.45)] backdrop-blur">
         <span className="grid size-7 place-items-center rounded-full bg-accent text-white">
@@ -67,7 +68,8 @@ export function Shell({ step, signedIn, view, startAt = null, children }: ShellP
           <h1 className="mt-4 text-3xl font-semibold leading-[0.98] tracking-tighter text-zinc-950 md:text-[2.5rem] phone-land:mt-3 phone-land:text-2xl">
             {site.headline}
           </h1>
-          <p className="mt-3 text-[15px] leading-relaxed text-zinc-600 phone-land:text-sm">{site.description}</p>
+          {/* Phones held sideways: just the headline, so the card stays small. */}
+          <p className="mt-3 text-[15px] leading-relaxed text-zinc-600 phone-land:hidden">{site.description}</p>
         </>
       )}
 
@@ -75,6 +77,17 @@ export function Shell({ step, signedIn, view, startAt = null, children }: ShellP
       {!view.me && <Steps current={step} />}
 
       <div className={view.me ? "mt-5 phone-land:mt-4" : "mt-6"}>{children}</div>
+
+      {signedIn && (
+        <form action={signOut} className="mt-5 md:hidden phone-land:block">
+          <button
+            type="submit"
+            className="h-10 w-full rounded-full bg-zinc-100 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-200 active:scale-[0.98]"
+          >
+            Sign out
+          </button>
+        </form>
+      )}
 
       {!view.me && (
         <div className="mt-6 flex flex-col gap-1 border-t border-zinc-200/80 pt-4 text-xs leading-relaxed text-zinc-500">

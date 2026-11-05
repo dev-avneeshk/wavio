@@ -49,7 +49,7 @@ export function ShellFrame({ map, header, top, summary, foldOnPhones = false, ch
 
       <section
         id="waitlist-card-wrap"
-        className={`relative z-10 -mt-6 px-3 pb-6 md:absolute md:left-6 md:top-20 md:mt-0 md:px-0 md:pb-0 phone-land:absolute phone-land:left-[max(0.75rem,env(safe-area-inset-left))] phone-land:top-14 phone-land:mt-0 phone-land:px-0 phone-land:pb-0 ${
+        className={`relative z-10 -mt-6 px-3 pb-6 md:absolute md:left-6 md:top-20 md:mt-0 md:px-0 md:pb-0 phone-land:absolute phone-land:left-[max(0.5rem,env(safe-area-inset-left))] phone-land:top-2 phone-land:mt-0 phone-land:px-0 phone-land:pb-0 ${
           collapsed
             ? "md:w-auto md:max-w-[420px] phone-land:w-auto phone-land:max-w-[330px]"
             : "md:w-[420px] phone-land:w-[330px]"
@@ -61,7 +61,7 @@ export function ShellFrame({ map, header, top, summary, foldOnPhones = false, ch
           className={`animate-rise border border-black/5 bg-white/95 shadow-[0_24px_60px_-28px_rgba(30,40,50,0.55)] backdrop-blur-md ${
             collapsed
               ? "rounded-full py-2 pl-4 pr-2"
-              : "rounded-[1.75rem] p-6 md:max-h-[calc(100dvh-6.5rem)] md:overflow-y-auto phone-land:max-h-[calc(100dvh-4.25rem)] phone-land:overflow-y-auto phone-land:rounded-3xl phone-land:p-4"
+              : "rounded-[1.75rem] p-6 md:max-h-[calc(100dvh-6.5rem)] md:overflow-y-auto phone-land:max-h-[calc(100dvh-1rem)] phone-land:overflow-y-auto phone-land:rounded-3xl phone-land:p-4"
           }`}
         >
           {collapsed && (

@@ -9,6 +9,8 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: site.pageTitle,
   description: site.description,
+  // iPhones can't hide Safari's bars for a web page; opened from the home screen, it's full screen.
+  appleWebApp: { capable: true, title: site.brand, statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {

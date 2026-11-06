@@ -16,6 +16,8 @@ import {
 } from "@/components/icons";
 import type { Zone } from "@/components/land/jungle";
 import { FullscreenButton } from "@/components/game/fullscreen-button";
+import { SoundButton } from "@/components/game/sound-button";
+import { MiniMap, type MapApi } from "@/components/game/town-map";
 import { decodeLook } from "@/components/people/look";
 import { useTouch } from "@/lib/device";
 import { incomeText, jobText, patchGame, useGame } from "@/lib/game";
@@ -40,6 +42,7 @@ export function PlayButton({ onPlay }: { onPlay: () => void }) {
 }
 
 type HudProps = {
+  mapApi: MapApi;
   username: string;
   onExit: () => void;
   onAct: (kind: "fight" | "steal" | "wave") => void;
@@ -52,7 +55,7 @@ type HudProps = {
 
 // Play mode: your money, health and job at the top, the stick and run button on the left (touch
 // screens), and what you can do to whoever is next to you on the right.
-export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun, zone, onTravel }: HudProps) {
+export function PlayHud({ mapApi, username, onExit, onAct, onStory, onStick, onRun, zone, onTravel }: HudProps) {
   const { char, near, busy } = useGame();
   const touch = useTouch();
   const look = char ? decodeLook(char.look) : null;
@@ -60,6 +63,7 @@ export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun, zone
   return (
     <div className="pointer-events-none absolute inset-0 z-20 select-none">
       <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-2 pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] md:p-4">
+        <div className="flex min-w-0 flex-col items-start gap-2">
         <div className="pointer-events-auto flex min-w-0 items-center gap-2.5 rounded-2xl bg-zinc-950/80 py-1.5 pl-1.5 pr-3 text-white shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)] backdrop-blur">
           <span
             className="grid size-9 shrink-0 place-items-center rounded-full ring-2 ring-white/70"
@@ -83,6 +87,8 @@ export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun, zone
             </p>
           </div>
         </div>
+        <MiniMap api={mapApi} />
+        </div>
         <div className="pointer-events-auto flex shrink-0 items-center gap-2">
           {zone === "town" ? (
             <HudButton onClick={() => onTravel("jungle")} label="Go to the jungle">
@@ -93,6 +99,7 @@ export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun, zone
               <HouseGlyph className="size-[18px]" />
             </HudButton>
           )}
+          <SoundButton variant="hud" />
           <FullscreenButton variant="hud" />
           <HudButton onClick={() => patchGame({ jobsOpen: true })} label="Job Market">
             <BriefcaseIcon className="size-[18px]" />

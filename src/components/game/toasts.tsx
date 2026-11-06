@@ -1,16 +1,23 @@
 "use client";
-
+import { useEffect, useRef } from "react";
 import { useGame } from "@/lib/game";
-
+import { sfx } from "@/lib/sound";
 const TONE = {
   good: "bg-emerald-600 text-white",
   bad: "bg-rose-600 text-white",
   info: "bg-zinc-900/90 text-white",
 } as const;
-
-// Short notes at the top of the map ("@x stole 12 coins from you").
+// Short notes at the top of the map ("@x stole 12 coins from you"), each with a little sound.
 export function GameToasts() {
   const { toasts } = useGame();
+  const heard = useRef(0);
+  useEffect(() => {
+    for (const t of toasts) {
+      if (t.id <= heard.current) continue;
+      heard.current = t.id;
+      if (!t.quiet) sfx(t.tone, null, 0, 0.8);
+    }
+  }, [toasts]);
   if (!toasts.length) return null;
   return (
     <div

@@ -352,3 +352,27 @@ export function ClapperIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+export function MapIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="m3.5 6.5 5.5-2.5 6 2.5 5.5-2.5v13.5L15 20l-6-2.5-5.5 2.5z" />
+      <path d="M9 4v13.5M15 6.5V20" />
+    </svg>
+  );
+}
+export function SpeakerIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
+    </svg>
+  );
+}
+export function SpeakerOffIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="m16 9.5 5 5M21 9.5l-5 5" />
+    </svg>
+  );
+}

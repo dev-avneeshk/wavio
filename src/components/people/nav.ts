@@ -494,6 +494,20 @@ export const groundY = (town: number, x: number, z: number) => {
   return bx <= BX / 2 - 1.6 && bz <= BZ / 2 - 1.6 ? Y0 : 0.3;
 };
 
+// What's underfoot, for footsteps: "soft" on lawns (gardens, parks, fields), "hard" on pavements,
+// roads, the plaza and the civic quarter's forecourts.
+export const surfaceAt = (town: number, x: number, z: number): "soft" | "hard" => {
+  const [ox, oz] = townCenter(town);
+  const i = Math.round((x - ox) / PX);
+  const j = Math.round((z - oz) / PZ);
+  if (Math.abs(i) > R || Math.abs(j) > R) return Math.abs(x - ox) > R * PX + BX / 2 + ROAD_EDGE || Math.abs(z - oz) > R * PZ + BZ / 2 + ROAD_EDGE ? "soft" : "hard";
+  const bx = Math.abs(x - ox - i * PX);
+  const bz = Math.abs(z - oz - j * PZ);
+  if (bx > BX / 2 - 1.6 || bz > BZ / 2 - 1.6) return "hard";
+  return isPlaza(i, j) || isCivic(i, j) ? "hard" : "soft";
+};
+const ROAD_EDGE = 12;
+
 // Things a player can't walk through in a town (besides houses): the plaza's fountain, towers,
 // lawns and the Job Centre, and the park ponds. Boxes (hx, hz), circles (r) or ellipses (rx, rz),
 // world coordinates.

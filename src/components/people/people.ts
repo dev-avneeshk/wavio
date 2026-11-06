@@ -524,6 +524,12 @@ export class People {
   playerFacing() {
     return this.player?.ry ?? 0;
   }
+  // Your person's place, heading, speed (m/s) and metres walked (for footsteps and the map).
+  playerMotion() {
+    const pl = this.player;
+    if (!pl) return null;
+    return { x: pl.x, z: pl.z, ry: pl.ry, speed: Math.hypot(pl.vx, pl.vz), dist: pl.dist };
+  }
 
   hasPlayer() {
     return this.player !== null;

@@ -16,6 +16,7 @@ import {
   type StoryItem,
 } from "@/lib/game";
 import { myStory } from "@/lib/game-api";
+import { sfx } from "@/lib/sound";
 
 const fmt = (n: number) => n.toLocaleString("en");
 
@@ -54,6 +55,9 @@ function StoryList({ items }: { items: StoryItem[] }) {
 }
 
 export function Sheet({ children, onClose, label }: { children: React.ReactNode; onClose: () => void; label: string }) {
+  useEffect(() => {
+    sfx("open", null, 0, 0.7);
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();

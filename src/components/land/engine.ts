@@ -207,6 +207,23 @@ export type ViewInfo = {
 // The house someone tapped (the page shows its card above it).
 export type Selection = { house: House; town: number; mine: boolean };
 
+// Where you are, for the sound and the town map (LandEngine.senses). fx, fz: the camera's
+// forward direction along the ground; height: the camera above what it looks at.
+export type Senses = {
+  town: number;
+  zone: Zone;
+  playing: boolean;
+  x: number;
+  z: number;
+  fx: number;
+  fz: number;
+  height: number;
+  dist: number;
+  player: { x: number; z: number; ry: number; speed: number; dist: number } | null;
+  site: { x: number; z: number } | null;
+  myPlot: number | null;
+};
+
 export type LandEngineOptions = {
   // Pixels on the left edge covered by the page's card (desktop), so focused things are centred in the free space.
   leftInset: () => number;
@@ -951,6 +968,75 @@ export class LandEngine {
   // Where your person is (play mode): town, the jungle trail or the clearing.
   get playerZone(): Zone {
     return this.zone;
+  }
+
+  // ---------- for the town map and the sound ----------
+
+  // Where you are: your person while playing, otherwise the middle of the view; which way the
+  // camera looks along the ground; how high and far away it is; and the nearest building site.
+  senses(): Senses {
+    const t = this.controls.target;
+    const cam = this.camera.position;
+    let fx = t.x - cam.x;
+    let fz = t.z - cam.z;
+    const fl = Math.hypot(fx, fz) || 1;
+    fx /= fl;
+    fz /= fl;
+    const player = this.playing ? this.people.playerMotion() : null;
+    const x = player ? player.x : t.x;
+    const z = player ? player.z : t.z;
+    let site: { x: number; z: number } | null = null;
+    let best = 60;
+    for (const h of this.built?.houses ?? []) {
+      if (h.spec.stage === 3) continue;
+      const d = Math.hypot(h.lot.x - x, h.lot.z - z);
+      if (d < best) {
+        best = d;
+        site = { x: h.lot.x, z: h.lot.z };
+      }
+    }
+    return {
+      town: this.active,
+      zone: this.active ? zoneAt(this.active, x, z) : "town",
+      playing: this.playing,
+      x,
+      z,
+      fx,
+      fz,
+      height: Math.max(0, cam.y - t.y),
+      dist: cam.distanceTo(t),
+      player,
+      site,
+      myPlot: this.me?.plot ?? null,
+    };
+  }
+
+  // The houses of the town drawn in detail, for the map.
+  mapHouses() {
+    const me = this.me?.plot ?? 0;
+    return (this.built?.houses ?? []).map((h) => ({
+      plot: h.n,
+      x: h.lot.x,
+      z: h.lot.z,
+      w: h.spec.w,
+      d: h.spec.d,
+      rot: h.lot.rot,
+      done: h.spec.stage === 3,
+      mine: h.n === me,
+    }));
+  }
+
+  // Look at a place in the town (from the map). facing: the way its front faces, to look at it
+  // from the front; null keeps the current angle.
+  flyToSpot(x: number, z: number, facing: number | null) {
+    if (this.playing) return;
+    this.select(null);
+    this.selectPerson(null);
+    const cur = new THREE.Spherical().setFromVector3(this.tmp.copy(this.camera.position).sub(this.controls.target));
+    this.flyTo(
+      { target: new THREE.Vector3(x, 2, z), radius: this.portrait() ? 64 : 54, phi: 0.95, theta: facing === null ? cur.theta : facing + 0.35 },
+      1400,
+    );
   }
 
   dispose() {

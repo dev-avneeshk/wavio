@@ -55,7 +55,10 @@ export type StoryItem = {
   live: boolean;
 };
 
-export type Toast = { id: number; text: string; tone: "good" | "bad" | "info" };
+export type Toast = { id: number; text: string; tone: "good" | "bad" | "info"; quiet?: boolean };
+
+// Where you're walking to (picked on the town map while playing).
+export type Dest = { key: string; name: string; x: number; z: number; color: string };
 
 type GameState = {
   ready: boolean; // in the game (game_enter answered)
@@ -67,6 +70,8 @@ type GameState = {
   storyOpen: boolean;
   jobsOpen: boolean; // the Job Market panel
   jobsFocus: JobKind | null; // opened by tapping a workplace: show that one first
+  mapOpen: boolean; // the town map
+  dest: Dest | null;
   toasts: Toast[];
   busy: boolean; // a fight or theft is being decided
 };
@@ -81,6 +86,8 @@ const initial: GameState = {
   storyOpen: false,
   jobsOpen: false,
   jobsFocus: null,
+  mapOpen: false,
+  dest: null,
   toasts: [],
   busy: false,
 };
@@ -114,13 +121,14 @@ export const addStory = (items: StoryItem[]) => {
 };
 
 let toastId = 0;
-export const toast = (text: string, tone: Toast["tone"] = "info") => {
-  const t = { id: ++toastId, text, tone };
+// quiet: no sound (a sound of its own was played).
+export const toast = (text: string, tone: Toast["tone"] = "info", quiet = false) => {
+  const t = { id: ++toastId, text, tone, quiet };
   set({ toasts: [...state.toasts.slice(-2), t] });
   window.setTimeout(() => set({ toasts: state.toasts.filter((x) => x.id !== t.id) }), 5200);
 };
 
-export const setPlay = (play: boolean) => set({ play, near: play ? state.near : null });
+export const setPlay = (play: boolean) => set({ play, near: play ? state.near : null, dest: play ? state.dest : null });
 
 // ---------- requests from the page to the map ----------
 

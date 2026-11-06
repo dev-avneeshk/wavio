@@ -17,6 +17,7 @@ import {
 import { Sheet } from "@/components/game/story-panel";
 import { JOB_INFO, JOB_PLACE, patchGame, toast, useGame, type JobKind, type MyChar } from "@/lib/game";
 import { jobMarket, quitJob, takeJob, type JobMarket as Market, type Place } from "@/lib/game-api";
+import { sfx } from "@/lib/sound";
 
 const fmt = (n: number) => n.toLocaleString("en");
 
@@ -112,7 +113,8 @@ export function JobMarket({ onHired, onShow }: Props) {
       return;
     }
     onHired(r.data);
-    toast(`You're hired: ${r.data.job ?? JOB_PLACE[kind]}. ${fmt(r.data.income)} coins a day.`, "good");
+    sfx("hire");
+    toast(`You're hired: ${r.data.job ?? JOB_PLACE[kind]}. ${fmt(r.data.income)} coins a day.`, "good", true);
     void load();
   }
 

@@ -11,7 +11,11 @@ import { FullscreenButton } from "@/components/game/fullscreen-button";
 import { JobMarket } from "@/components/game/job-market";
 import { GameToasts } from "@/components/game/toasts";
 import { useGameSession } from "@/components/game/use-game-session";
-import { BriefcaseIcon, ChatIcon, GlobeIcon, HouseGlyph, TreeIcon } from "@/components/icons";
+import { SoundButton } from "@/components/game/sound-button";
+import { SoundDirector } from "@/components/game/sound-director";
+import { TownMap, type MapApi } from "@/components/game/town-map";
+import { BriefcaseIcon, ChatIcon, GlobeIcon, HouseGlyph, MapIcon, TreeIcon } from "@/components/icons";
+import { animalSound, sfx } from "@/lib/sound";
 import type { PersonInfo } from "@/components/people/people";
 import { hasSupabaseEnv } from "@/lib/env";
 import {
@@ -116,7 +120,10 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
         onSelect: setSel,
         onSelectPerson: setPerson,
         onNear: (near) => patchGame({ near }),
-        onPlay: (on) => setPlay(on),
+        onPlay: (on) => {
+          if (on !== getGame().play) sfx("whoosh", null, 0, 0.7);
+          setPlay(on);
+        },
         onZone: (z) => {
           setZone(z);
           const note = ZONE_NOTE[z];
@@ -125,7 +132,10 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
             toast(note, "good");
           }
         },
-        onAnimal: (n) => toast(n.text, "info"),
+        onAnimal: (n) => {
+          animalSound(n.kind);
+          toast(n.text, "info", true);
+        },
         onJobs: (kind) => patchGame({ jobsOpen: true, jobsFocus: kind }),
         startAt: startRef.current,
       });
@@ -142,7 +152,10 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
     const ro = card ? new ResizeObserver(() => engine.relayout()) : null;
     if (card) ro?.observe(card);
     const offFly = onFlyRequest((plot) => void engine.flyToHouse(plot));
-    const offMsg = onIncoming((m) => engine.showBubble(m.from, m.body));
+    const offMsg = onIncoming((m) => {
+      sfx("pop");
+      engine.showBubble(m.from, m.body);
+    });
     return () => {
       ro?.disconnect();
       offFly();
@@ -191,7 +204,10 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
     async (kind: "fight" | "steal" | "wave") => {
       const eng = engineRef.current;
       if (!eng || !me) return;
-      if (kind === "wave") return eng.playAct("wave", null);
+      if (kind === "wave") {
+        sfx("whistle");
+        return eng.playAct("wave", null);
+      }
       const g = getGame();
       const near = g.near;
       if (!near || g.busy) return;
@@ -200,6 +216,18 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
       patchGame({ busy: false });
       if (!r.ok) return toast(r.error, "bad");
       const d = r.data;
+      // The sounds of it: punches then a win or a fall; a grab, then coins or getting caught.
+      if (kind === "fight") {
+        [0.15, 0.6, 1.0, 1.55, 2.1, 2.7, 3.3].forEach((t, k) => sfx("punch", null, t, k % 2 ? 0.75 : 1));
+        if (d.winner === me.plot) {
+          sfx("cheer", null, 4.0);
+          if (d.coins) sfx("coin", null, 4.3);
+        } else sfx("thud", null, 4.05);
+      } else {
+        sfx("swish");
+        if (d.detail === "ok") sfx("coin", null, 0.35);
+        else if (d.detail !== "empty") sfx("bad", null, 0.35);
+      }
       const ev: GameEvent = {
         id: d.id,
         at: eng.serverNow(),
@@ -229,7 +257,7 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
       const show = () => {
         addStory([item]);
         patchGame({ char: d.char });
-        toast(storyText(item), storyTone(item));
+        toast(storyText(item), storyTone(item), true);
       };
       if (kind === "fight") window.setTimeout(show, 4000);
       else show();
@@ -275,6 +303,15 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
     engineRef.current?.selectPerson(null);
     void engineRef.current?.flyToHouse(plot);
   }, []);
+  // What the town map and the sound need from the 3D view.
+  const mapApi = useMemo<MapApi>(
+    () => ({
+      senses: () => engineRef.current?.senses() ?? null,
+      houses: () => engineRef.current?.mapHouses() ?? [],
+      flyTo: (x, z, facing) => engineRef.current?.flyToSpot(x, z, facing),
+    }),
+    [],
+  );
 
   if (failed) return <LandFallback />;
 
@@ -305,6 +342,7 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
       <GameToasts />
       {play && me ? (
         <PlayHud
+          mapApi={mapApi}
           username={me.username}
           onExit={stopPlay}
           onAct={(k) => void act(k)}
@@ -353,6 +391,12 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
                 </span>
               </MapButton>
             )}
+            <MapButton icon onClick={() => patchGame({ mapOpen: true })} label="Town map">
+              <span className="inline-flex items-center gap-1.5">
+                <MapIcon className="size-4" />
+                <PhoneHidden>Map</PhoneHidden>
+              </span>
+            </MapButton>
             <MapButton icon onClick={() => void engineRef.current?.flyToJungle()} label="Show the jungle next to this town">
               <span className="inline-flex items-center gap-1.5">
                 <TreeIcon className="size-4" />
@@ -365,6 +409,7 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
                 <PhoneHidden>World</PhoneHidden>
               </span>
             </MapButton>
+            <SoundButton variant="map" />
             <FullscreenButton variant="map" />
             {me ? (
               <MapButton icon strong onClick={() => void engineRef.current?.flyToFocus()} label="My house">
@@ -394,6 +439,8 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
       {me && <AwayPanel username={me.username} onPlay={startPlay} />}
       <StoryPanel />
       {hasSupabaseEnv && <JobMarket onHired={hired} onShow={fly} />}
+      <TownMap api={mapApi} />
+      <SoundDirector senses={mapApi.senses} />
       <RotateGate />
     </div>
   );

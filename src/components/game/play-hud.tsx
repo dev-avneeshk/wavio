@@ -1,12 +1,24 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { BookIcon, CloseIcon, CoinIcon, FistIcon, HandIcon, HeartIcon, HouseGlyph, PlayIcon, TreeIcon, WaveIcon } from "@/components/icons";
+import {
+  BookIcon,
+  BriefcaseIcon,
+  CloseIcon,
+  CoinIcon,
+  FistIcon,
+  HandIcon,
+  HeartIcon,
+  HouseGlyph,
+  PlayIcon,
+  TreeIcon,
+  WaveIcon,
+} from "@/components/icons";
 import type { Zone } from "@/components/land/jungle";
 import { FullscreenButton } from "@/components/game/fullscreen-button";
 import { decodeLook } from "@/components/people/look";
 import { useTouch } from "@/lib/device";
-import { incomeText, jobText, useGame } from "@/lib/game";
+import { incomeText, jobText, patchGame, useGame } from "@/lib/game";
 
 const fmt = (n: number) => n.toLocaleString("en");
 
@@ -82,6 +94,9 @@ export function PlayHud({ username, onExit, onAct, onStory, onStick, onRun, zone
             </HudButton>
           )}
           <FullscreenButton variant="hud" />
+          <HudButton onClick={() => patchGame({ jobsOpen: true })} label="Job Market">
+            <BriefcaseIcon className="size-[18px]" />
+          </HudButton>
           <HudButton onClick={onStory} label="Your story">
             <BookIcon className="size-[18px]" />
           </HudButton>

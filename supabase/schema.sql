@@ -332,6 +332,23 @@ create table if not exists public.characters (
 
 create index if not exists characters_town_next_idx on public.characters (town, next_at);
 
+-- Jobs (section 13): which kind of job (null: none yet), the hospital seat (1 is the best one),
+-- when they were hired, and up to when their pay has been added to their wallet.
+alter table public.characters add column if not exists job_kind text;
+alter table public.characters add column if not exists job_seat smallint;
+alter table public.characters add column if not exists hired_at timestamptz;
+alter table public.characters add column if not exists paid_at timestamptz;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'characters_job_kind_ok') then
+    alter table public.characters add constraint characters_job_kind_ok
+      check (job_kind is null or job_kind in ('hospital', 'labour', 'odd'));
+  end if;
+end;
+$$;
+-- One person per hospital seat, however many people apply at the same moment.
+create unique index if not exists characters_hospital_seat_idx on public.characters (job_seat) where job_kind = 'hospital';
+
 alter table public.characters enable row level security;
 revoke all on table public.characters from anon, authenticated;
 
@@ -742,8 +759,10 @@ create index if not exists character_events_target_at_idx on public.character_ev
 alter table public.character_events enable row level security;
 revoke all on table public.character_events from anon, authenticated;
 
--- A chore, by personality. Hurt people rest.
-create or replace function public.char_pick_task(p_trait text, p_hp integer)
+-- A chore, by personality. Hurt people rest. People with a job (p_job: its kind) go to work
+-- instead of queueing at the Job Market, and work more than anything else.
+drop function if exists public.char_pick_task(text, integer);
+create or replace function public.char_pick_task(p_trait text, p_hp integer, p_job text)
 returns text
 language plpgsql
 volatile
@@ -751,9 +770,19 @@ set search_path = ''
 as $$
 declare
   r double precision := random();
+  w double precision;
 begin
   if p_hp < 35 then
     return 'rest';
+  end if;
+  if p_job is not null then
+    w := case p_trait when 'hardworking' then 0.6 when 'lazy' then 0.3 else 0.45 end;
+    if r < w then
+      return 'work_' || p_job;
+    end if;
+    r := random();
+    return case when r < 0.18 then 'sweep' when r < 0.34 then 'water' when r < 0.5 then 'jog'
+      when r < 0.66 then 'park' when r < 0.78 then 'build' when r < 0.88 then 'mailbox' else 'rest' end;
   end if;
   if p_trait = 'lazy' then
     return case when r < 0.3 then 'rest' when r < 0.5 then 'park' when r < 0.7 then 'jobqueue'
@@ -842,9 +871,10 @@ begin
   end if;
 
   if v_kind = 'task' then
-    v_detail := public.char_pick_task(c.trait, hp);
+    v_detail := public.char_pick_task(c.trait, hp, c.job_kind);
     v_dur := case v_detail when 'sweep' then 150 when 'water' then 120 when 'mailbox' then 45 when 'jog' then 240
-      when 'park' then 300 when 'build' then 120 when 'rest' then 480 else 360 end;
+      when 'park' then 300 when 'build' then 120 when 'rest' then 480
+      when 'work_hospital' then 540 when 'work_labour' then 480 when 'work_odd' then 420 else 360 end;
     if v_detail = 'rest' then
       update public.characters x set health = least(100, hp + 25), health_at = now() where x.plot = c.plot;
     end if;
@@ -887,6 +917,26 @@ begin
 end;
 $$;
 
+-- Pay day, all the time: whole coins earned since paid_at (income is coins a day) go into the
+-- wallet, and paid_at moves on by exactly the time those coins took, so nothing is lost.
+create or replace function public.char_pay(p_plot integer)
+returns void
+language sql
+volatile
+security definer
+set search_path = ''
+as $$
+  update public.characters x set
+    wallet = x.wallet + d.coins,
+    paid_at = x.paid_at + make_interval(secs => d.coins * 86400.0 / x.income)
+  from (
+    select c.plot, floor(c.income * extract(epoch from (now() - c.paid_at)) / 86400)::int as coins
+    from public.characters c
+    where c.plot = p_plot and c.income > 0 and c.paid_at is not null
+  ) d
+  where x.plot = d.plot and d.coins >= 1;
+$$;
+
 -- Bring a town up to date: everyone whose owner is away and who's due does their next thing.
 -- Cheap when nothing is due. At most 200 people and 10 things each per call; the next call goes on.
 create or replace function public.advance_town(p_town integer)
@@ -910,6 +960,15 @@ begin
   if not pg_try_advisory_xact_lock(hashtext('public.advance_town'), p_town) then
     return;
   end if;
+  -- Wages, in house order (the order every other update locks people in).
+  for ch in
+    select c.plot from public.characters c
+    where c.town = p_town and c.income > 0 and c.paid_at < now() - interval '10 minutes'
+    order by c.plot
+    limit 500
+  loop
+    perform public.char_pay(ch.plot);
+  end loop;
   for ch in
     select c.plot, c.next_at from public.characters c
     where c.town = p_town and c.next_at <= horizon and not public.char_online(c.last_seen)
@@ -978,6 +1037,7 @@ set search_path = ''
 as $$
   select json_build_object(
     'plot', c.plot, 'look', c.look, 'age', c.age, 'trait', c.trait, 'job', c.job, 'income', c.income,
+    'jobKind', c.job_kind, 'seat', c.job_seat,
     'wallet', c.wallet, 'health', public.char_hp(c.health, c.health_at)
   );
 $$;
@@ -1042,6 +1102,7 @@ begin
     perform public.advance_town(c.town);
   end if;
   perform public.char_cancel_future(me);
+  perform public.char_pay(me);
   -- While you're here, your person does nothing on their own (and catches up on nothing later).
   update public.characters x set last_seen = now(), next_at = greatest(x.next_at, now() + interval '6 minutes')
   where x.plot = me
@@ -1073,6 +1134,7 @@ begin
   if me is null then
     raise exception 'join the waitlist first' using hint = 'game_not_on_list';
   end if;
+  perform public.char_pay(me);
   update public.characters x set last_seen = now(), next_at = greatest(x.next_at, now() + interval '6 minutes')
   where x.plot = me
   returning * into c;
@@ -1258,7 +1320,8 @@ revoke execute on function public.char_trait(integer) from public, anon, authent
 revoke execute on function public.char_age(integer) from public, anon, authenticated;
 revoke execute on function public.char_hp(smallint, timestamptz) from public, anon, authenticated;
 revoke execute on function public.char_online(timestamptz) from public, anon, authenticated;
-revoke execute on function public.char_pick_task(text, integer) from public, anon, authenticated;
+revoke execute on function public.char_pick_task(text, integer, text) from public, anon, authenticated;
+revoke execute on function public.char_pay(integer) from public, anon, authenticated;
 revoke execute on function public.char_auto_event(integer, timestamptz) from public, anon, authenticated;
 revoke execute on function public.advance_town(integer) from public, anon, authenticated;
 revoke execute on function public.char_cancel_future(integer) from public, anon, authenticated;
@@ -1276,6 +1339,249 @@ grant execute on function public.game_leave() to authenticated;
 grant execute on function public.my_story(bigint) to authenticated;
 grant execute on function public.char_act(text, integer) to authenticated;
 grant execute on function public.town_events(integer) to anon, authenticated;
+
+-- 13. The Job Market. First come, first served. The hospital has a fixed number of seats (one row
+--     each in job_titles, seat 1 the best paid); the next person to apply gets the best free one.
+--     Building sites (labour) and odd jobs round town always need people; you get one of their
+--     titles at random. Pay is coins a day, paid into the wallet as it's earned (char_pay).
+--     To open more hospital jobs, add rows to job_titles.
+create table if not exists public.job_titles (
+  kind text not null,
+  n smallint not null,
+  title text not null,
+  pay integer not null,
+  primary key (kind, n),
+  constraint job_titles_kind_ok check (kind in ('hospital', 'labour', 'odd')),
+  constraint job_titles_pay_ok check (pay > 0)
+);
+
+alter table public.job_titles enable row level security;
+revoke all on table public.job_titles from anon, authenticated;
+
+insert into public.job_titles (kind, n, title, pay) values
+  ('hospital', 1, 'Hospital Director (Self-Appointed)', 300),
+  ('hospital', 2, 'Chief Brain Surgeon (Learned on YouTube)', 290),
+  ('hospital', 3, 'Head of Heart Transplants and Snacks', 280),
+  ('hospital', 4, 'Professor of Hiccups', 272),
+  ('hospital', 5, 'Midnight Zombie Doctor', 265),
+  ('hospital', 6, 'Royal Bone Whisperer', 258),
+  ('hospital', 7, 'Emergency Room DJ', 252),
+  ('hospital', 8, 'Chief Sneeze Scientist', 246),
+  ('hospital', 9, 'Doctor of Dramatic Fainting', 240),
+  ('hospital', 10, 'Senior Nose Inspector', 234),
+  ('hospital', 11, 'Ambulance Drift Driver', 228),
+  ('hospital', 12, 'Laughing Gas Taster', 222),
+  ('hospital', 13, 'X-Ray Vision Officer', 216),
+  ('hospital', 14, 'Head of Big Injections', 211),
+  ('hospital', 15, 'Germ Bounty Hunter', 206),
+  ('hospital', 16, 'Brain Freeze Consultant', 201),
+  ('hospital', 17, 'Snore Specialist to the Stars', 196),
+  ('hospital', 18, 'Professor of Belly Buttons', 191),
+  ('hospital', 19, 'Night Shift Ghost Nurse', 186),
+  ('hospital', 20, 'Stethoscope Beatboxer', 182),
+  ('hospital', 21, 'Chief Bandage Mummifier', 178),
+  ('hospital', 22, 'Plaster Cast Artist', 174),
+  ('hospital', 23, 'Dentist to Crocodiles', 170),
+  ('hospital', 24, 'Tickle Therapist', 166),
+  ('hospital', 25, 'Hospital Food Critic', 162),
+  ('hospital', 26, 'Vitamin Smuggler', 158),
+  ('hospital', 27, 'Ear Wax Archaeologist', 155),
+  ('hospital', 28, 'Doctor of Tiny Feet', 152),
+  ('hospital', 29, 'Burp Analyst', 149),
+  ('hospital', 30, 'Head of Lost Teeth', 146),
+  ('hospital', 31, 'Eyebrow Surgeon', 143),
+  ('hospital', 32, 'Wheelchair Racing Coach', 140),
+  ('hospital', 33, 'Thermometer Juggler', 138),
+  ('hospital', 34, 'Chief Lollipop Officer', 136),
+  ('hospital', 35, 'Allergy Detective', 134),
+  ('hospital', 36, 'Pill Counter (Can Count to 10)', 132),
+  ('hospital', 37, 'Mood Ring Doctor', 130),
+  ('hospital', 38, 'Hairball Specialist', 128),
+  ('hospital', 39, 'Brainwave Radio Operator', 126),
+  ('hospital', 40, 'Doctor of Sleepwalking', 125),
+  ('hospital', 41, 'Hiccup Night Nurse', 124),
+  ('hospital', 42, 'Bubble Wrap Popper (Stress Ward)', 123),
+  ('hospital', 43, 'Head of Mystery Rashes', 122),
+  ('hospital', 44, 'Ice Pack Delivery Ninja', 121),
+  ('hospital', 45, 'Waiting Room Comedian', 120),
+  ('hospital', 46, 'Official Toe Counter', 120),
+  ('hospital', 47, 'Junior Doctor of Everything', 120),
+  ('hospital', 48, 'Rubber Glove Inflator', 120),
+  ('hospital', 49, 'Plaster Sticker', 120),
+  ('hospital', 50, 'Hospital Intern (Holds the Torch)', 120),
+  ('labour', 1, 'Brick Juggler', 62),
+  ('labour', 2, 'Cement Mixer Whisperer', 58),
+  ('labour', 3, 'Professional Hole Digger', 55),
+  ('labour', 4, 'Scaffolding Monkey', 66),
+  ('labour', 5, 'Wheelbarrow Racer', 52),
+  ('labour', 6, 'Chief Hammer Swinger', 64),
+  ('labour', 7, 'Paint Splasher', 50),
+  ('labour', 8, 'Sand Pile Guard', 45),
+  ('labour', 9, 'Roof Tile Thrower', 60),
+  ('labour', 10, 'Crane Hook Babysitter', 68),
+  ('labour', 11, 'Pothole Filler', 48),
+  ('labour', 12, 'Nail Counter', 42),
+  ('odd', 1, 'Chai Wallah', 55),
+  ('odd', 2, 'Street Sweeper', 40),
+  ('odd', 3, 'Official Pigeon Feeder', 35),
+  ('odd', 4, 'Traffic Cone Mover', 38),
+  ('odd', 5, 'Lost Slipper Finder', 32),
+  ('odd', 6, 'Mango Seller', 50),
+  ('odd', 7, 'Walker of Seven Dogs', 45),
+  ('odd', 8, 'Professional Queue Stander', 30),
+  ('odd', 9, 'Balloon Seller', 42),
+  ('odd', 10, 'Auto-Rickshaw Pusher', 48),
+  ('odd', 11, 'Shoe Shiner', 44),
+  ('odd', 12, 'Fake Tour Guide', 52)
+on conflict (kind, n) do update set title = excluded.title, pay = excluded.pay;
+
+-- The market, for anyone: the hospital's free seats and its staff, how many work on the building
+-- sites and at odd jobs, what each pays, and your own job if you're signed in.
+-- hospital.staff: [seat, title, pay, plot, username] in seat order.
+create or replace function public.job_market()
+returns json
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with seats as (
+    select t.n, t.title, t.pay, c.plot, w.instagram_username as username
+    from public.job_titles t
+    left join public.characters c on c.job_kind = 'hospital' and c.job_seat = t.n
+    left join public.waitlist w on w.plot = c.plot
+    where t.kind = 'hospital'
+  ),
+  me as (
+    select c.* from public.characters c where c.plot = public.my_plot()
+  )
+  select json_build_object(
+    'hospital', json_build_object(
+      'total', (select count(*)::int from seats),
+      'open', (select count(*)::int from seats s where s.plot is null),
+      'next', (
+        select json_build_object('seat', s.n, 'title', s.title, 'pay', s.pay)
+        from seats s where s.plot is null order by s.n limit 1
+      ),
+      'staff', coalesce((
+        select json_agg(json_build_array(s.n, s.title, s.pay, s.plot, s.username) order by s.n)
+        from seats s where s.plot is not null
+      ), '[]'::json)
+    ),
+    'labour', (
+      select json_build_object(
+        'workers', (select count(*)::int from public.characters c where c.job_kind = 'labour'),
+        'low', min(t.pay), 'high', max(t.pay)
+      )
+      from public.job_titles t where t.kind = 'labour'
+    ),
+    'odd', (
+      select json_build_object(
+        'workers', (select count(*)::int from public.characters c where c.job_kind = 'odd'),
+        'low', min(t.pay), 'high', max(t.pay)
+      )
+      from public.job_titles t where t.kind = 'odd'
+    ),
+    'member', public.my_plot() is not null,
+    'mine', (
+      select case when m.job_kind is null then null
+        else json_build_object('kind', m.job_kind, 'title', m.job, 'pay', m.income, 'seat', m.job_seat) end
+      from me m
+    )
+  );
+$$;
+
+-- Apply for a job (p_kind: hospital, labour or odd). The hospital gives you its best free seat,
+-- or says it's full. Taking a job leaves the one you had (a hospital seat goes back on the market).
+-- Pay for the old job is settled first. One change a minute.
+create or replace function public.take_job(p_kind text)
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  me integer := public.my_plot();
+  c public.characters;
+  s public.job_titles;
+begin
+  if me is null then
+    raise exception 'join the waitlist first' using hint = 'game_not_on_list';
+  end if;
+  if p_kind is null or p_kind not in ('hospital', 'labour', 'odd') then
+    raise exception 'no such job' using hint = 'job_bad_kind';
+  end if;
+  -- One hire at a time, everywhere: first come, first served.
+  perform pg_advisory_xact_lock(hashtext('public.take_job'));
+  insert into public.characters (plot, look, age, trait)
+  values (me, public.char_look(me), public.char_age(me), public.char_trait(me))
+  on conflict (plot) do nothing;
+  select * into c from public.characters x where x.plot = me for update;
+  if c.job_kind = p_kind then
+    raise exception 'already there' using hint = 'job_already';
+  end if;
+  if c.hired_at > now() - interval '1 minute' then
+    raise exception 'too soon' using hint = 'job_wait';
+  end if;
+  if p_kind = 'hospital' then
+    select * into s from public.job_titles t
+    where t.kind = 'hospital'
+      and not exists (select 1 from public.characters x where x.job_kind = 'hospital' and x.job_seat = t.n)
+    order by t.n
+    limit 1;
+    if not found then
+      raise exception 'hospital full' using hint = 'job_full';
+    end if;
+  else
+    select * into s from public.job_titles t where t.kind = p_kind order by random() limit 1;
+    if not found then
+      raise exception 'no such job' using hint = 'job_bad_kind';
+    end if;
+  end if;
+  perform public.char_pay(me);
+  update public.characters x set
+    job = s.title, job_kind = s.kind, job_seat = case when s.kind = 'hospital' then s.n end,
+    income = s.pay, hired_at = now(), paid_at = now()
+  where x.plot = me
+  returning * into c;
+  return json_build_object('char', public.char_json(c));
+end;
+$$;
+
+-- Leave your job: pay up to now, and a hospital seat goes back on the market.
+create or replace function public.quit_job()
+returns json
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  me integer := public.my_plot();
+  c public.characters;
+begin
+  if me is null then
+    raise exception 'join the waitlist first' using hint = 'game_not_on_list';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('public.take_job'));
+  perform public.char_pay(me);
+  update public.characters x set job = null, job_kind = null, job_seat = null, income = 0, paid_at = null
+  where x.plot = me
+  returning * into c;
+  if not found then
+    raise exception 'join the waitlist first' using hint = 'game_not_on_list';
+  end if;
+  return json_build_object('char', public.char_json(c));
+end;
+$$;
+
+revoke execute on function public.job_market() from public;
+revoke execute on function public.take_job(text) from public, anon;
+revoke execute on function public.quit_job() from public, anon;
+grant execute on function public.job_market() to anon, authenticated;
+grant execute on function public.take_job(text) to authenticated;
+grant execute on function public.quit_job() to authenticated;
 
 -- Removed in older versions of this file (the map now reads waitlist_world).
 drop function if exists public.waitlist_position();

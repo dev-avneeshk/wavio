@@ -8,9 +8,10 @@ import { PlayButton, PlayHud } from "@/components/game/play-hud";
 import { RotateGate } from "@/components/game/rotate-gate";
 import { AwayPanel, StoryPanel } from "@/components/game/story-panel";
 import { FullscreenButton } from "@/components/game/fullscreen-button";
+import { JobMarket } from "@/components/game/job-market";
 import { GameToasts } from "@/components/game/toasts";
 import { useGameSession } from "@/components/game/use-game-session";
-import { ChatIcon, GlobeIcon, HouseGlyph, TreeIcon } from "@/components/icons";
+import { BriefcaseIcon, ChatIcon, GlobeIcon, HouseGlyph, TreeIcon } from "@/components/icons";
 import type { PersonInfo } from "@/components/people/people";
 import { hasSupabaseEnv } from "@/lib/env";
 import {
@@ -24,6 +25,7 @@ import {
   toast,
   useGame,
   type GameEvent,
+  type MyChar,
   type StoryItem,
 } from "@/lib/game";
 import { PHONE_LAND, isPhone } from "@/lib/device";
@@ -124,6 +126,7 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
           }
         },
         onAnimal: (n) => toast(n.text, "info"),
+        onJobs: () => patchGame({ jobsOpen: true }),
         startAt: startRef.current,
       });
     } catch (error) {
@@ -263,6 +266,11 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
     openChat(plot);
   }, []);
   const waved = useCallback((plot: number, waves: number) => engineRef.current?.patchHouse(plot, { waves }), []);
+  // A new job (or none): your card, the game and the tag over your person all show it.
+  const hired = useCallback((char: MyChar) => {
+    patchGame({ char });
+    engineRef.current?.patchHouse(char.plot, { job: char.job, income: char.income });
+  }, []);
   const fly = useCallback((plot: number) => {
     engineRef.current?.selectPerson(null);
     void engineRef.current?.flyToHouse(plot);
@@ -337,6 +345,14 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
                 </span>
               </MapButton>
             )}
+            {hasSupabaseEnv && (
+              <MapButton icon onClick={() => patchGame({ jobsOpen: true })} label="Job Market">
+                <span className="inline-flex items-center gap-1.5">
+                  <BriefcaseIcon className="size-4" />
+                  <PhoneHidden>Jobs</PhoneHidden>
+                </span>
+              </MapButton>
+            )}
             <MapButton icon onClick={() => void engineRef.current?.flyToJungle()} label="Show the jungle next to this town">
               <span className="inline-flex items-center gap-1.5">
                 <TreeIcon className="size-4" />
@@ -377,6 +393,7 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
       />
       {me && <AwayPanel username={me.username} onPlay={startPlay} />}
       <StoryPanel />
+      {hasSupabaseEnv && <JobMarket onHired={hired} onShow={fly} />}
       <RotateGate />
     </div>
   );

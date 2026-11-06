@@ -2,7 +2,7 @@
 // the database (supabase/schema.sql, sections 11 and 12); this file turns its answers into data and
 // its error hints into plain words.
 import { supabaseEnv } from "@/lib/env";
-import type { GameEvent, MyChar, StoryItem } from "@/lib/game";
+import type { GameEvent, JobKind, MyChar, StoryItem } from "@/lib/game";
 import { createClient } from "@/lib/supabase/client";
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -15,6 +15,10 @@ const WORDS: Record<string, string> = {
   game_steal_wait: "Lie low for a couple of minutes before the next one.",
   game_steal_again: "You already robbed them today. Try someone else.",
   game_too_hurt: "You're too hurt to fight. Rest at home first.",
+  job_bad_kind: "That job doesn't exist.",
+  job_full: "Too late: every hospital job is taken. Building sites and odd jobs are still hiring.",
+  job_already: "You already work there.",
+  job_wait: "You just changed jobs. Try again in a minute.",
 };
 
 const fail = (error: { hint?: string | null; code?: string; message?: string } | null): { ok: false; error: string } => {
@@ -41,6 +45,8 @@ async function rpc<T>(fn: string, args: Record<string, unknown>, parse: (data: u
   }
 }
 
+const isJobKind = (v: unknown): v is JobKind => v === "hospital" || v === "labour" || v === "odd";
+
 const parseChar = (v: unknown): MyChar | null => {
   const o = v as Record<string, unknown> | null;
   if (!o || !isInt(o.plot)) return null;
@@ -50,6 +56,8 @@ const parseChar = (v: unknown): MyChar | null => {
     age: intOr(o.age, 0) ?? 0,
     trait: str(o.trait),
     job: typeof o.job === "string" && o.job ? o.job : null,
+    jobKind: isJobKind(o.jobKind) ? o.jobKind : null,
+    seat: intOr(o.seat),
     income: intOr(o.income, 0) ?? 0,
     wallet: intOr(o.wallet, 0) ?? 0,
     health: intOr(o.health, 100) ?? 100,
@@ -188,3 +196,50 @@ export const townEvents = async (town: number): Promise<TownFeed | null> => {
   });
   return r.ok ? r.data : null;
 };
+
+// ---------- the Job Market ----------
+
+export type Staff = { seat: number; title: string; pay: number; plot: number; username: string };
+export type JobMarket = {
+  hospital: { total: number; open: number; next: { seat: number; title: string; pay: number } | null; staff: Staff[] };
+  labour: { workers: number; low: number; high: number };
+  odd: { workers: number; low: number; high: number };
+  member: boolean; // signed in with a house
+  mine: { kind: JobKind; title: string; pay: number; seat: number | null } | null;
+};
+
+const parseGroup = (v: unknown) => {
+  const o = v as Record<string, unknown> | null;
+  return { workers: intOr(o?.workers, 0) ?? 0, low: intOr(o?.low, 0) ?? 0, high: intOr(o?.high, 0) ?? 0 };
+};
+
+export const jobMarket = () =>
+  rpc("job_market", {}, (d): JobMarket | null => {
+    const o = d as Record<string, unknown> | null;
+    const h = o?.hospital as Record<string, unknown> | undefined;
+    if (!o || !h || !isInt(h.total) || !isInt(h.open)) return null;
+    const n = h.next as Record<string, unknown> | null;
+    const staff: Staff[] = [];
+    if (Array.isArray(h.staff))
+      for (const r of h.staff)
+        if (Array.isArray(r) && isInt(r[0]) && isInt(r[3]))
+          staff.push({ seat: r[0], title: str(r[1]), pay: intOr(r[2], 0) ?? 0, plot: r[3], username: str(r[4]) });
+    const m = o.mine as Record<string, unknown> | null;
+    return {
+      hospital: {
+        total: h.total,
+        open: h.open,
+        next: n && isInt(n.seat) ? { seat: n.seat, title: str(n.title), pay: intOr(n.pay, 0) ?? 0 } : null,
+        staff,
+      },
+      labour: parseGroup(o.labour),
+      odd: parseGroup(o.odd),
+      member: o.member === true,
+      mine: m && isJobKind(m.kind) ? { kind: m.kind, title: str(m.title), pay: intOr(m.pay, 0) ?? 0, seat: intOr(m.seat) } : null,
+    };
+  });
+
+const charOnly = (d: unknown) => parseChar((d as Record<string, unknown> | null)?.char);
+
+export const takeJob = (kind: JobKind) => rpc("take_job", { p_kind: kind }, charOnly);
+export const quitJob = () => rpc("quit_job", {}, charOnly);

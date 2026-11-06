@@ -17,13 +17,19 @@ export type GameEvent = {
   live: boolean; // done by a player in the game
 };
 
-// Your own person (wallet and health are only sent to you).
+// The kinds of job at the Job Market (supabase/schema.sql, section 13).
+export type JobKind = "hospital" | "labour" | "odd";
+
+// Your own person (wallet and health are only sent to you). job: the job's title; seat: your seat
+// at the hospital (1 is the best).
 export type MyChar = {
   plot: number;
   look: number;
   age: number;
   trait: string;
   job: string | null;
+  jobKind: JobKind | null;
+  seat: number | null;
   income: number;
   wallet: number;
   health: number;
@@ -53,6 +59,7 @@ type GameState = {
   away: { first: boolean; seconds: number; items: StoryItem[] } | null; // the "while you were away" panel
   story: StoryItem[]; // newest first
   storyOpen: boolean;
+  jobsOpen: boolean; // the Job Market panel
   toasts: Toast[];
   busy: boolean; // a fight or theft is being decided
 };
@@ -65,6 +72,7 @@ const initial: GameState = {
   away: null,
   story: [],
   storyOpen: false,
+  jobsOpen: false,
   toasts: [],
   busy: false,
 };
@@ -125,7 +133,10 @@ export const requestMap = (r: MapRequest) => {
 const fmt = (n: number) => n.toLocaleString("en");
 
 export const TASKS: Record<string, { past: string; now: string; going?: string }> = {
-  jobqueue: { past: "Waited in line at the Job Centre. No jobs yet.", now: "Waiting at the Job Centre", going: "Off to the Job Centre" },
+  jobqueue: { past: "Hung about at the Job Market.", now: "At the Job Market", going: "Off to the Job Market" },
+  work_hospital: { past: "Did a shift at the hospital.", now: "On shift at the hospital", going: "Off to the hospital" },
+  work_labour: { past: "Did a shift on a building site.", now: "Working on a building site", going: "Off to work" },
+  work_odd: { past: "Did odd jobs round the plaza.", now: "Doing odd jobs", going: "Off to work" },
   sweep: { past: "Swept the front garden.", now: "Sweeping the garden" },
   water: { past: "Watered the plants.", now: "Watering the plants" },
   mailbox: { past: "Checked the mailbox.", now: "Checking the mailbox" },
@@ -136,6 +147,18 @@ export const TASKS: Record<string, { past: string; now: string; going?: string }
 };
 
 export const jobText = (job: string | null) => job ?? "Waiting for a job";
+
+// Where each kind of job is.
+export const JOB_PLACE: Record<JobKind, string> = {
+  hospital: "City Hospital",
+  labour: "Building sites",
+  odd: "Odd jobs",
+};
+export const JOB_WHERE: Record<JobKind, string> = {
+  hospital: "at the City Hospital",
+  labour: "on the building sites",
+  odd: "doing odd jobs round town",
+};
 export const incomeText = (income: number) => `${fmt(Math.max(0, income))} coins/day`;
 
 const who = (s: StoryItem) => (s.otherName ? `@${s.otherName}` : "a neighbour");

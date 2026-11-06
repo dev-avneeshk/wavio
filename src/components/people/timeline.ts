@@ -11,10 +11,13 @@ import {
   homeSpot,
   join,
   mailboxApproach,
+  hospitalShift,
+  oddJobSpot,
   parkSeat,
   plazaEntry,
   queueSpot,
   route,
+  siteFor,
   toGate,
   type Home,
   type Pt,
@@ -254,8 +257,48 @@ const taskPlan = (ev: GameEvent, ctx: PlanContext): Plan | null => {
       );
       return make(tr, still("sitBench", seat.p, seat.ry, t1));
     }
+    case "work_hospital": {
+      // A shift at the hospital: out front with the other doctors.
+      const s = hospitalShift(h.town, ev.actor);
+      const [entry] = s.path;
+      const tr = trip(
+        h,
+        t1,
+        t2,
+        (from) => join(toGate(h, from), route(h.town, h.gate, entry, ih(ev.id, 1)).slice(1), s.path.slice(1)),
+        (to) => join([...s.path].reverse(), route(h.town, entry, h.gate, ih(ev.id, 2)).slice(1), fromGate(h, to).slice(1)),
+      );
+      return make(tr, still("crossed", s.p, s.ry, t1));
+    }
+    case "work_labour": {
+      // On the building site next door, hard at work on the house.
+      const n = homeOf(siteFor(ev.actor, ev.id));
+      const spot = homeSpot(n, "build");
+      const tr = trip(
+        h,
+        t1,
+        t2,
+        (from) => join(toGate(h, from), route(h.town, h.gate, n.gate, ih(ev.id, 1)).slice(1), [spot]),
+        (to) => join([spot], route(h.town, n.gate, h.gate, ih(ev.id, 2)), fromGate(h, to).slice(1)),
+      );
+      return make(tr, still("mailbox", spot, n.in, t1));
+    }
+    case "work_odd": {
+      // Odd jobs in the plaza: selling, or sweeping up.
+      const s = oddJobSpot(h.town, ih(ev.actor, ev.id));
+      const entry = plazaEntry(h.town, s.p);
+      const tr = trip(
+        h,
+        t1,
+        t2,
+        (from) => join(toGate(h, from), route(h.town, h.gate, entry, ih(ev.id, 1)).slice(1), [s.p]),
+        (to) => join([s.p], route(h.town, entry, h.gate, ih(ev.id, 2)), fromGate(h, to).slice(1)),
+      );
+      const sweep = new Path([s.p, { x: s.p.x + 3, z: s.p.z }]);
+      return make(tr, ev.id % 2 ? along("sweep", sweep, 0.3, t1, 1) : still("look", s.p, s.ry, t1));
+    }
     default: {
-      // The Job Centre in the plaza, in line with everyone else waiting for a job.
+      // The Job Market in the plaza, in line with everyone else looking for work.
       const q = queueSpot(h.town, ctx.queueIndex(ev), ev.id);
       const entry = plazaEntry(h.town, q.p);
       const tr = trip(

@@ -266,6 +266,41 @@ export const plazaEntry = (town: number, p: Pt): Pt => {
   return { x: p.x, z: oz + SIDE.z };
 };
 
+// ---------- work (town coordinates, plaza at 0,0) ----------
+
+// The City Hospital, in the plaza's fourth corner (opposite the Job Market); its door faces the
+// fountain (+z). The ambulance is parked by its east side.
+export const HOSPITAL = { x: -14.8, z: -12.6, hx: 3.6, hz: 2.6, h: 5.6 };
+export const AMBULANCE = { x: -7.4, z: -12.6, hx: 0.85, hz: 1.75 };
+const HOSPITAL_LANE_X = -9.6; // the way in from the north pavement, between hospital and ambulance
+
+// On shift at the hospital: a spot along its front, the way to face, and the way in from the
+// north pavement line (it never cuts through the building).
+const SHIFT_X = [-2.8, -2.0, -0.2, 0.6, 2.2, 3.0]; // along the front, clear of the canopy posts
+export const hospitalShift = (town: number, seed: number): { p: Pt; ry: number; path: Pt[] } => {
+  const [ox, oz] = townCenter(town);
+  const front = oz + HOSPITAL.z + HOSPITAL.hz;
+  const k = seed % (SHIFT_X.length * 2);
+  const p = { x: ox + HOSPITAL.x + SHIFT_X[k % SHIFT_X.length], z: front + (k < SHIFT_X.length ? 2.4 : 3.3) };
+  const entry = { x: ox + HOSPITAL_LANE_X, z: oz - SIDE.z };
+  const walk = front + 0.6; // under the canopy, above the flower bed
+  return { p, ry: (((seed >>> 3) % 3) - 1) * 0.5, path: [entry, { x: entry.x, z: walk }, { x: p.x, z: walk }, p] };
+};
+
+// Odd jobs: the south side of the plaza, between the fountain's benches and the street.
+export const oddJobSpot = (town: number, seed: number): { p: Pt; ry: number } => {
+  const [ox, oz] = townCenter(town);
+  return { p: { x: ox - 4.5 + (seed % 10), z: oz + 11.4 + ((seed >>> 4) % 2) * 1.4 }, ry: 0 };
+};
+
+// Labour: the building site next door (the house one along, in the same town).
+export const siteFor = (plot: number, seed: number) => {
+  const local = (plot - 1) % 1000;
+  if (local === 0) return plot + 1;
+  if (local === 999) return plot - 1;
+  return seed % 2 ? plot + 1 : plot - 1;
+};
+
 // ---------- parks ----------
 
 type Bench = { x: number; z: number; ry: number; cz: number };
@@ -344,6 +379,8 @@ export const obstaclesOf = (town: number): Obstacle[] => {
     { x: ox - 14.8, z: oz + 12.5, hx: 3.4, hz: 3.4 },
     { x: ox + 14.8, z: oz - 12.5, r: 3.4 },
     { x: ox + KIOSK.x, z: oz + KIOSK.z, hx: KIOSK.hx + 0.2, hz: KIOSK.hz + 0.2 },
+    { x: ox + HOSPITAL.x, z: oz + HOSPITAL.z, hx: HOSPITAL.hx + 0.2, hz: HOSPITAL.hz + 0.2 },
+    { x: ox + AMBULANCE.x, z: oz + AMBULANCE.z, hx: AMBULANCE.hx + 0.15, hz: AMBULANCE.hz + 0.15 },
   ];
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) v.push({ x: ox + sx * 23, z: oz + sz * 13.5, hx: 4.1, hz: 4.1 });
   for (const pk of parksOf(town)) v.push({ x: ox + pk.i * PX, z: oz + pk.j * PZ, hx: 7.2, hz: 4.6 });
@@ -357,6 +394,7 @@ export const tallThings = (town: number) => {
   const [ox, oz] = townCenter(town);
   return [
     { x: ox + KIOSK.x, z: oz + KIOSK.z, hx: KIOSK.hx + 0.25, hz: KIOSK.hz + 0.25, top: 0.6 + KIOSK.h + 2.0 },
+    { x: ox + HOSPITAL.x, z: oz + HOSPITAL.z, hx: HOSPITAL.hx + 0.25, hz: HOSPITAL.hz + 0.25, top: 0.6 + HOSPITAL.h + 1.6 },
     { x: ox - 14.8, z: oz + 12.5, hx: 3.0, hz: 3.0, top: 36 },
     { x: ox + 14.8, z: oz - 12.5, hx: 2.6, hz: 2.6, top: 30 },
   ];

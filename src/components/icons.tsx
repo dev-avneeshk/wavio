@@ -271,3 +271,36 @@ export function ShrinkIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function BriefcaseIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <rect x="3.5" y="7.5" width="17" height="12" rx="2" />
+      <path d="M9 7.5V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v1.5M3.5 12.5h17M11 12.5v1.5h2v-1.5" />
+    </svg>
+  );
+}
+
+export function MedicIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className}>
+      <path fill="currentColor" d="M9.5 3.5h5v6h6v5h-6v6h-5v-6h-6v-5h6z" />
+    </svg>
+  );
+}
+
+export function HardHatIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M3.5 17.5h17M5 17.5v-2a7 7 0 0 1 14 0v2M10 8.6V6.5h4v2.1M12 8.5v4" />
+    </svg>
+  );
+}
+
+export function CupIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M5 9.5h11v4.5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5V9.5zM16 11h1.5a2 2 0 0 1 0 4H16M8.5 3.5c-.6.9.6 1.6 0 2.5M12 3.5c-.6.9.6 1.6 0 2.5" />
+    </svg>
+  );
+}

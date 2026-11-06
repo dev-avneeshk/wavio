@@ -13,7 +13,7 @@ import { Builder, C, T } from "../land/geo";
 import { jungleObstacles, walkClamp } from "../land/jungle";
 import { townCenter } from "../land/layout";
 import { decodeLook, lookForPlot, type Look } from "./look";
-import { KIOSK, groundY, homeOf, obstaclesOf, type Home, type Obstacle } from "./nav";
+import { AMBULANCE, HOSPITAL, KIOSK, groundY, homeOf, obstaclesOf, type Home, type Obstacle } from "./nav";
 import { actCode, actOf, buildRig, disposeRig, poseRig, strideOf, type Act, type Anim, type Gait, type Rig } from "./rig";
 import { evalPose, newPose, plansFor, type Plan, type PlanContext, type Pose } from "./timeline";
 
@@ -104,10 +104,10 @@ const kioskSignTex = (font: string) => {
   g.textAlign = "center";
   g.textBaseline = "middle";
   g.font = `900 78px ${font}`;
-  g.fillText("JOB CENTRE", 256, 78, 480);
+  g.fillText("JOB MARKET", 256, 78, 480);
   g.fillStyle = "#2A2A2A";
   g.font = `900 30px ${font}`;
-  g.fillText("JOBS OPENING SOON · QUEUE HERE", 256, 172, 490);
+  g.fillText("NOW HIRING · FIRST COME, FIRST SERVED", 256, 172, 490);
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
@@ -138,6 +138,86 @@ const kioskGeo = () => {
 
 const SIGN_Y = 0.6 + KIOSK.h + 1.35;
 
+// The City Hospital's roof sign.
+const hospitalSignTex = (font: string) => {
+  const cv = document.createElement("canvas");
+  cv.width = 512;
+  cv.height = 160;
+  const g = cv.getContext("2d") as CanvasRenderingContext2D;
+  g.fillStyle = "#D93A3A";
+  g.fillRect(0, 0, 512, 160);
+  g.fillStyle = "#FFFFFF";
+  g.fillRect(40, 58, 72, 24);
+  g.fillRect(64, 34, 24, 72);
+  g.textAlign = "left";
+  g.textBaseline = "middle";
+  g.font = `900 70px ${font}`;
+  g.fillText("HOSPITAL", 136, 70, 350);
+  g.fillStyle = "#FFE3E3";
+  g.font = `800 24px ${font}`;
+  g.fillText("DOCTORS WANTED · 50 JOBS", 138, 128, 350);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+};
+
+// The hospital (built round its own centre, door to +z) and its ambulance.
+const hospitalGeo = () => {
+  const b = new Builder();
+  const { hx, hz, h } = HOSPITAL;
+  const y0 = 0.6;
+  const WALL = C("#F4F1EA");
+  const TRIM = C("#C93A3A");
+  const GLASS = C("#A9C3D3");
+  const RED = C("#E23B3B");
+  b.add(T.box, 0, 0.56, 0.3, hx * 2 + 0.5, 0.12, hz * 2 + 1.1, 0, C("#CFC6B5"));
+  b.add(T.box, 0, y0 + h / 2, 0, hx * 2, h, hz * 2, 0, WALL);
+  b.add(T.box, 0, y0 + h / 2, 0, hx * 2 + 0.08, 0.16, hz * 2 + 0.08, 0, C("#D7DEE3"));
+  b.add(T.box, 0, y0 + h + 0.12, 0, hx * 2 + 0.3, 0.24, hz * 2 + 0.3, 0, TRIM);
+  // Windows: two floors, all round (the front's middle is the door and the cross).
+  const rows = [y0 + 1.55, y0 + h / 2 + 1.35];
+  for (const y of rows) {
+    for (const x of [-2.6, -1.4, 1.4, 2.6]) {
+      b.add(T.box, x, y, hz + 0.02, 0.85, 0.95, 0.05, 0, GLASS);
+      b.add(T.box, x, y, -hz - 0.02, 0.85, 0.95, 0.05, 0, GLASS);
+    }
+    for (const z of [-1.2, 0, 1.2]) for (const s of [-1, 1]) b.add(T.box, s * (hx + 0.02), y, z, 0.05, 0.95, 0.8, 0, GLASS);
+  }
+  b.add(T.box, 0, rows[1], -hz - 0.02, 0.85, 0.95, 0.05, 0, GLASS);
+  // The red cross over the door.
+  b.add(T.box, 0, rows[1], hz + 0.05, 0.38, 1.3, 0.06, 0, RED);
+  b.add(T.box, 0, rows[1], hz + 0.05, 1.3, 0.38, 0.06, 0, RED);
+  // Glass doors, a canopy on two posts, and a step.
+  b.add(T.box, 0, y0 + 1.05, hz + 0.03, 1.6, 2.1, 0.06, 0, C("#8CC3E0"));
+  b.add(T.box, 0, y0 + 1.05, hz + 0.05, 0.06, 2.1, 0.06, 0, C("#D7DEE3"));
+  b.add(T.box, 0, y0 + 2.5, hz + 0.65, 2.8, 0.14, 1.3, 0, TRIM);
+  for (const s of [-1, 1]) b.add(T.box, s * 1.25, y0 + 1.22, hz + 1.2, 0.12, 2.44, 0.12, 0, C("#D7DEE3"));
+  b.add(T.box, 0, 0.6, hz + 0.55, 2.4, 0.16, 1.1, 0, C("#D8D2C4"));
+  // Roof: sign posts and frame (the writing goes on both faces), and an air vent.
+  for (const s of [-1, 1]) b.add(T.box, s * (hx - 0.8), y0 + h + 0.5, 0, 0.12, 0.55, 0.12, 0, C("#2A2A2A"));
+  b.add(T.box, 0, HOSPITAL_SIGN_Y, 0, hx * 2 - 1.05, 1.42, 0.08, 0, C("#1F2226"));
+  b.add(T.box, -hx + 0.9, y0 + h + 0.5, -hz + 0.9, 0.9, 0.6, 0.9, 0, C("#B9C1C7"));
+  // The ambulance, parked facing the fountain.
+  const ax = AMBULANCE.x - HOSPITAL.x;
+  const az = AMBULANCE.z - HOSPITAL.z;
+  const ab = 0.5 + 0.3;
+  b.add(T.box, ax, ab + 0.75, az - 0.2, 1.7, 1.5, 2.6, 0, C("#F7F7F5"));
+  b.add(T.box, ax, ab + 0.5, az + 1.35, 1.7, 1.0, 0.9, 0, C("#F7F7F5"));
+  b.add(T.box, ax, ab + 0.62, az, 1.72, 0.22, 3.52, 0, RED);
+  b.add(T.box, ax, ab + 0.95, az + 1.81, 1.4, 0.32, 0.04, 0, GLASS);
+  for (const s of [-1, 1]) {
+    b.add(T.box, ax + s * 0.86, ab + 1.1, az - 0.3, 0.04, 0.42, 0.14, 0, RED);
+    b.add(T.box, ax + s * 0.86, ab + 1.1, az - 0.3, 0.04, 0.14, 0.42, 0, RED);
+    for (const z of [-1.1, 1.15]) b.add(T.box, ax + s * 0.78, 0.5 + 0.3, az + z, 0.26, 0.56, 0.56, 0, C("#2A2A2A"));
+  }
+  b.add(T.box, ax - 0.22, ab + 1.58, az + 0.3, 0.42, 0.16, 0.3, 0, C("#FF3B3B"));
+  b.add(T.box, ax + 0.22, ab + 1.58, az + 0.3, 0.42, 0.16, 0.3, 0, C("#3B7BFF"));
+  return b.geometry();
+};
+
+const HOSPITAL_SIGN_Y = 0.6 + HOSPITAL.h + 1.35;
+
 // Simple shapes for people further away: legs, body, head, and a soft shadow under everyone.
 const farShapes = () => ({
   legs: new THREE.BoxGeometry(0.3, 0.88, 0.2).translate(0, 0.44, 0),
@@ -157,8 +237,9 @@ export class People {
   private farHead: THREE.InstancedMesh;
   private blobs: THREE.InstancedMesh;
   private blobMat: THREE.MeshBasicMaterial;
-  private kiosk: THREE.Group | null = null;
+  private kiosk: THREE.Group | null = null; // the Job Market and the hospital
   private kioskSign: THREE.MeshBasicMaterial | null = null;
+  private hospitalSign: THREE.MeshBasicMaterial | null = null;
 
   private town = 0;
   private persons = new Map<number, Person>();
@@ -995,6 +1076,7 @@ export class People {
       this.kiosk.removeFromParent();
     }
     const [ox, oz] = townCenter(this.town);
+    const root = new THREE.Group();
     const g = new THREE.Group();
     const body = new THREE.Mesh(kioskGeo(), this.mat);
     body.castShadow = !this.o.lowPower;
@@ -1008,8 +1090,26 @@ export class People {
       g.add(sign);
     }
     g.position.set(ox + KIOSK.x, 0, oz + KIOSK.z);
-    this.group.add(g);
-    this.kiosk = g;
+    root.add(g);
+
+    // The City Hospital, where the doctors work.
+    const hg = new THREE.Group();
+    const hb = new THREE.Mesh(hospitalGeo(), this.mat);
+    hb.castShadow = !this.o.lowPower;
+    hb.receiveShadow = true;
+    hg.add(hb);
+    if (!this.hospitalSign) this.hospitalSign = new THREE.MeshBasicMaterial({ map: hospitalSignTex(this.o.font) });
+    for (const side of [1, -1]) {
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(HOSPITAL.hx * 2 - 1.2, 1.3), this.hospitalSign);
+      sign.position.set(0, HOSPITAL_SIGN_Y, side * 0.045);
+      if (side < 0) sign.rotation.y = Math.PI;
+      hg.add(sign);
+    }
+    hg.position.set(ox + HOSPITAL.x, 0, oz + HOSPITAL.z);
+    root.add(hg);
+
+    this.group.add(root);
+    this.kiosk = root;
   }
 
   dispose() {
@@ -1027,6 +1127,8 @@ export class People {
     this.blobMat.dispose();
     this.kioskSign?.map?.dispose();
     this.kioskSign?.dispose();
+    this.hospitalSign?.map?.dispose();
+    this.hospitalSign?.dispose();
     this.mat.dispose();
     this.farMat.dispose();
     this.group.removeFromParent();

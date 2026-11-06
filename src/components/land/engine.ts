@@ -31,7 +31,7 @@ import {
 import type { GameEvent } from "@/lib/game";
 import type { TownFeed } from "@/lib/game-api";
 import type { LiveLink } from "@/lib/game-live";
-import { homeOf, tallThings } from "../people/nav";
+import { HOSPITAL, KIOSK, homeOf, tallThings } from "../people/nav";
 import { People, type Near, type PersonInfo } from "../people/people";
 import { Wildlife, type AnimalNote } from "../wild/animals";
 import { JUNGLE, buildJungle, gateSignTex, jungleOf, zoneAt, type JungleBuild, type Zone } from "./jungle";
@@ -230,6 +230,8 @@ export type LandEngineOptions = {
   onAnimal?: (note: AnimalNote) => void;
   // Play mode started or ended (also when it can't start yet).
   onPlay?: (on: boolean) => void;
+  // The Job Market booth or the hospital was tapped.
+  onJobs?: () => void;
 };
 
 // Keys that walk your person (arrows or WASD), and Shift to run.
@@ -597,7 +599,7 @@ export class LandEngine {
   }
 
   // Someone changed a house (for example, waved at it): update the map without rebuilding it.
-  patchHouse(plot: number, patch: Partial<Pick<House, "waves">>) {
+  patchHouse(plot: number, patch: Partial<Pick<House, "waves" | "job" | "income">>) {
     const houses = this.towns.get(townOf(plot));
     const h = houses?.get(plot);
     if (!h) return;
@@ -1531,6 +1533,18 @@ export class LandEngine {
 
   private pickDist = Infinity; // how far along the ray the last picked house was
 
+  // The ray (set by the last pick) hits the Job Market booth or the hospital in the town drawn in detail.
+  private pickJobs() {
+    if (!this.active) return false;
+    const [ox, oz] = townCenter(this.active);
+    const box = new THREE.Box3();
+    return [KIOSK, HOSPITAL].some((b) => {
+      box.min.set(ox + b.x - b.hx, 0, oz + b.z - b.hz);
+      box.max.set(ox + b.x + b.hx, 0.6 + b.h + 2.2, oz + b.z + b.hz);
+      return this.ray.ray.intersectsBox(box);
+    });
+  }
+
   // The town under a screen point (0 if none).
   private pickTown(clientX: number, clientY: number) {
     this.setRay(clientX, clientY);
@@ -1587,6 +1601,11 @@ export class LandEngine {
       // Zoomed out, a tap on a town flies there.
       const t = this.pickTown(e.clientX, e.clientY);
       if (t) void this.flyToTown(t);
+      return;
+    }
+    // A tap on the Job Market booth or the hospital opens the Job Market.
+    if (this.opts.onJobs && this.zone === "town" && this.pickJobs()) {
+      this.opts.onJobs();
       return;
     }
     // A tap on an empty plot picks it.

@@ -1,8 +1,8 @@
 "use client";
 
-import { BookIcon, PlayIcon } from "@/components/icons";
+import { BookIcon, BriefcaseIcon, PlayIcon } from "@/components/icons";
 import { TRAITS, decodeLook, lookWords } from "@/components/people/look";
-import { incomeText, jobText, patchGame, requestMap, useGame } from "@/lib/game";
+import { JOB_WHERE, incomeText, jobText, patchGame, requestMap, useGame } from "@/lib/game";
 
 const fmt = (n: number) => n.toLocaleString("en");
 
@@ -38,9 +38,22 @@ export function MyPerson() {
         <Fact label="Health" value={char ? `${char.health} / 100` : "..."} />
       </dl>
       <p className="mt-2.5 text-xs leading-snug text-zinc-500">
-        Everyone is waiting for a job; jobs are handed out soon. While you&apos;re away, your person lives on their own.
+        {char?.job
+          ? `Works ${char.jobKind ? JOB_WHERE[char.jobKind] : ""}${char.seat ? ` (seat #${char.seat})` : ""}. Pay goes into the wallet as they earn it.`
+          : "The Job Market is open: hospital jobs go first come, first served."}{" "}
+        While you&apos;re away, your person lives on their own.
       </p>
-      <div className="mt-3 flex gap-2">
+      <button
+        type="button"
+        onClick={() => patchGame({ jobsOpen: true })}
+        className={`mt-3 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-full text-sm font-semibold transition-[transform,background-color] active:scale-[0.98] ${
+          char?.job ? "bg-zinc-100 text-zinc-900 hover:bg-zinc-200" : "bg-zinc-900 text-white hover:bg-zinc-800"
+        }`}
+      >
+        <BriefcaseIcon className="size-4" />
+        {char?.job ? "Job Market" : "Find a job"}
+      </button>
+      <div className="mt-2 flex gap-2">
         <button
           type="button"
           disabled={!ready}

@@ -127,8 +127,8 @@ export function AwayPanel({ username, onPlay }: { username: string; onPlay: () =
             <div className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-950 ring-1 ring-amber-200">
               While you&apos;re here, you control them: press <b>Play</b> and walk them around town. When you leave, they live
               on their own: chores, going to work, chatting with neighbours, and the odd fight or theft. Come back to
-              see what they got up to. Get them a job at the Job Market: the hospital&apos;s jobs go first come, first
-              served.
+              see what they got up to. Get them a job at the Job Market: seats at the hospital, police station, tech
+              park, fire station, school, bank and film studio go first come, first served.
             </div>
             {away.items.length > 0 && <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-zinc-500">So far</p>}
           </>

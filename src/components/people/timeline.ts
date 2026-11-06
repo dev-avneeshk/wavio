@@ -19,10 +19,24 @@ import {
   route,
   siteFor,
   toGate,
+  workFrame,
+  workShift,
+  WORK_FRONT,
   type Home,
   type Pt,
+  type WorkKind,
 } from "./nav";
 import type { Act, Gait } from "./rig";
+
+// What people do on shift at each workplace ("patrol": up and down the front).
+const SHIFT_ACTS: Record<WorkKind, (Act | "patrol")[]> = {
+  police: ["crossed", "patrol", "look", "crossed", "shakeFist"],
+  fire: ["water", "crossed", "stretch", "water", "look"],
+  engineer: ["phone", "watch", "mailbox", "phone", "look"],
+  bank: ["phone", "crossed", "mailbox", "look"],
+  school: ["chat", "crossed", "chat", "look", "wave"],
+  film: ["cheer", "wave", "shakeFist", "look", "chat", "stretch"],
+};
 
 export type Pose = {
   x: number;
@@ -269,6 +283,33 @@ const taskPlan = (ev: GameEvent, ctx: PlanContext): Plan | null => {
         (to) => join([...s.path].reverse(), route(h.town, entry, h.gate, ih(ev.id, 2)).slice(1), fromGate(h, to).slice(1)),
       );
       return make(tr, still("crossed", s.p, s.ry, t1));
+    }
+    case "work_police":
+    case "work_fire":
+    case "work_engineer":
+    case "work_bank":
+    case "work_school":
+    case "work_film": {
+      // A shift at one of the civic quarter's workplaces, out front with the rest of the staff.
+      const kind = ev.detail.slice(5) as WorkKind;
+      const s = workShift(kind, h.town, ev.actor);
+      const [entry] = s.path;
+      const tr = trip(
+        h,
+        t1,
+        t2,
+        (from) => join(toGate(h, from), route(h.town, h.gate, entry, ih(ev.id, 1)).slice(1), s.path.slice(1)),
+        (to) => join([...s.path].reverse(), route(h.town, entry, h.gate, ih(ev.id, 2)).slice(1), fromGate(h, to).slice(1)),
+      );
+      const acts = SHIFT_ACTS[kind];
+      const act = acts[ih(ev.id, 3) % acts.length];
+      if (act === "patrol") {
+        // Walking up and down the front.
+        const f = workFrame(kind, h.town);
+        const beat = new Path([s.p, f.at(0, WORK_FRONT + 3.2)]);
+        return make(tr, along("none", beat, 0.7, t1, 1));
+      }
+      return make(tr, still(act, s.p, s.ry, t1));
     }
     case "work_labour": {
       // On the building site next door, hard at work on the house.

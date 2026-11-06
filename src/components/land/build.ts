@@ -24,6 +24,7 @@ import {
   WALK,
   Y0,
   hashStr,
+  isCivic,
   isPark,
   isPlaza,
   lotAt,
@@ -530,6 +531,19 @@ const parkBlock = (b: Adder, cx: number, cz: number, seed: string) => {
   for (const a of [0.4, 2.0, 3.6, 5.2]) addBench(b, cx + Math.cos(a) * 16.5, Y0, cz + Math.sin(a) * 10.5, -a - Math.PI / 2);
 };
 
+// A civic block: lawn, a row of trees along the back (back = -1: north, 1: south) and a few down
+// the middle between its two workplaces.
+const civicBlock = (b: Adder, cx: number, cz: number, back: number, seed: string) => {
+  blockBase(b, cx, cz, LAWN);
+  const r = rng(hashStr(`civic${seed}`));
+  for (let x = -24; x <= 24.1; x += 4.8) {
+    if (r() < 0.75) addTree(b, cx + x + (r() - 0.5) * 1.2, Y0, cz + back * (15.6 + r() * 1.4), 0.85 + r() * 0.35, r);
+    else addPine(b, cx + x, Y0, cz + back * 16, 0.9 + r() * 0.25, r);
+  }
+  for (const z of [-8, 0, 8]) addTree(b, cx + (r() - 0.5) * 1.0, Y0, cz + back * z * 0.9, 0.8 + r() * 0.3, r);
+  for (const z of [-12, -4, 4, 12]) addBush(b, cx + (r() < 0.5 ? -1.2 : 1.2), Y0, cz + z, 0.8, r);
+};
+
 // Clock tower, origin at its base centre.
 const addClockTower = (b: Adder) => {
   const CR = "#F0DDB0";
@@ -807,6 +821,16 @@ export const buildTown = (
       const cz = oz + j * PZ;
       if (isPlaza(i, j)) {
         plazaBlock(placed(b, ox, 0, oz, 1));
+        continue;
+      }
+      if (isCivic(i, j)) {
+        // The workplaces themselves are drawn with the people (people/workplaces.ts).
+        civicBlock(b, cx, cz, j < 0 ? -1 : 1, `${town}:${i},${j}`);
+        for (const sx of [-1, 1])
+          for (const sz of [-1, 1]) {
+            addLamp(b, cx + sx * (BX / 2 - 0.8), 0.3, cz + sz * (BZ / 2 - 0.8));
+            lamps.push(cx + sx * (BX / 2 - 0.8), 0.3 + LAMP_HEAD, cz + sz * (BZ / 2 - 0.8));
+          }
         continue;
       }
       if (isPark(i, j)) {

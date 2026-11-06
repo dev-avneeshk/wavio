@@ -126,7 +126,7 @@ export default function LandView({ view, signedIn = false, startAt = null }: Lan
           }
         },
         onAnimal: (n) => toast(n.text, "info"),
-        onJobs: () => patchGame({ jobsOpen: true }),
+        onJobs: (kind) => patchGame({ jobsOpen: true, jobsFocus: kind }),
         startAt: startRef.current,
       });
     } catch (error) {

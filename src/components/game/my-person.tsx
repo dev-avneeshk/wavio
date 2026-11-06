@@ -40,7 +40,7 @@ export function MyPerson() {
       <p className="mt-2.5 text-xs leading-snug text-zinc-500">
         {char?.job
           ? `Works ${char.jobKind ? JOB_WHERE[char.jobKind] : ""}${char.seat ? ` (seat #${char.seat})` : ""}. Pay goes into the wallet as they earn it.`
-          : "The Job Market is open: hospital jobs go first come, first served."}{" "}
+          : "The Job Market is open: hospital, police, engineering, fire, school, bank and film jobs go first come, first served."}{" "}
         While you&apos;re away, your person lives on their own.
       </p>
       <button

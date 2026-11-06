@@ -2,7 +2,7 @@
 // the database (supabase/schema.sql, sections 11 and 12); this file turns its answers into data and
 // its error hints into plain words.
 import { supabaseEnv } from "@/lib/env";
-import type { GameEvent, JobKind, MyChar, StoryItem } from "@/lib/game";
+import { PLACES, isJobKind, type GameEvent, type JobKind, type MyChar, type PlaceKind, type StoryItem } from "@/lib/game";
 import { createClient } from "@/lib/supabase/client";
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -16,7 +16,7 @@ const WORDS: Record<string, string> = {
   game_steal_again: "You already robbed them today. Try someone else.",
   game_too_hurt: "You're too hurt to fight. Rest at home first.",
   job_bad_kind: "That job doesn't exist.",
-  job_full: "Too late: every hospital job is taken. Building sites and odd jobs are still hiring.",
+  job_full: "Too late: every seat there is taken. Try another place; building sites and odd jobs always hire.",
   job_already: "You already work there.",
   job_wait: "You just changed jobs. Try again in a minute.",
 };
@@ -44,8 +44,6 @@ async function rpc<T>(fn: string, args: Record<string, unknown>, parse: (data: u
     return { ok: false, error: "Couldn't reach the server. Check your connection." };
   }
 }
-
-const isJobKind = (v: unknown): v is JobKind => v === "hospital" || v === "labour" || v === "odd";
 
 const parseChar = (v: unknown): MyChar | null => {
   const o = v as Record<string, unknown> | null;
@@ -200,8 +198,11 @@ export const townEvents = async (town: number): Promise<TownFeed | null> => {
 // ---------- the Job Market ----------
 
 export type Staff = { seat: number; title: string; pay: number; plot: number; username: string };
+export type Seat = { seat: number; title: string; pay: number };
+// A workplace with seats: how many, how many are free, the next one up, seat 1, who works there.
+export type Place = { kind: PlaceKind; total: number; open: number; next: Seat | null; top: Seat | null; staff: Staff[] };
 export type JobMarket = {
-  hospital: { total: number; open: number; next: { seat: number; title: string; pay: number } | null; staff: Staff[] };
+  places: Place[]; // in the Job Market's order
   labour: { workers: number; low: number; high: number };
   odd: { workers: number; low: number; high: number };
   member: boolean; // signed in with a house
@@ -213,25 +214,43 @@ const parseGroup = (v: unknown) => {
   return { workers: intOr(o?.workers, 0) ?? 0, low: intOr(o?.low, 0) ?? 0, high: intOr(o?.high, 0) ?? 0 };
 };
 
+const parseSeat = (v: unknown): Seat | null => {
+  const n = v as Record<string, unknown> | null;
+  return n && isInt(n.seat) ? { seat: n.seat, title: str(n.title), pay: intOr(n.pay, 0) ?? 0 } : null;
+};
+
+const parsePlace = (v: unknown, kind: PlaceKind): Place | null => {
+  const h = v as Record<string, unknown> | null;
+  if (!h || !isInt(h.total) || !isInt(h.open)) return null;
+  const staff: Staff[] = [];
+  if (Array.isArray(h.staff))
+    for (const r of h.staff)
+      if (Array.isArray(r) && isInt(r[0]) && isInt(r[3]))
+        staff.push({ seat: r[0], title: str(r[1]), pay: intOr(r[2], 0) ?? 0, plot: r[3], username: str(r[4]) });
+  return { kind, total: h.total, open: h.open, next: parseSeat(h.next), top: parseSeat(h.top), staff };
+};
+
 export const jobMarket = () =>
   rpc("job_market", {}, (d): JobMarket | null => {
     const o = d as Record<string, unknown> | null;
-    const h = o?.hospital as Record<string, unknown> | undefined;
-    if (!o || !h || !isInt(h.total) || !isInt(h.open)) return null;
-    const n = h.next as Record<string, unknown> | null;
-    const staff: Staff[] = [];
-    if (Array.isArray(h.staff))
-      for (const r of h.staff)
-        if (Array.isArray(r) && isInt(r[0]) && isInt(r[3]))
-          staff.push({ seat: r[0], title: str(r[1]), pay: intOr(r[2], 0) ?? 0, plot: r[3], username: str(r[4]) });
+    if (!o) return null;
+    const places: Place[] = [];
+    if (Array.isArray(o.places))
+      for (const p of o.places) {
+        const kind = (p as Record<string, unknown> | null)?.kind;
+        if (!(PLACES as readonly unknown[]).includes(kind)) continue;
+        const parsed = parsePlace(p, kind as PlaceKind);
+        if (parsed) places.push(parsed);
+      }
+    else {
+      // An older database: the hospital only.
+      const h = parsePlace(o.hospital, "hospital");
+      if (h) places.push(h);
+    }
+    if (!places.length) return null;
     const m = o.mine as Record<string, unknown> | null;
     return {
-      hospital: {
-        total: h.total,
-        open: h.open,
-        next: n && isInt(n.seat) ? { seat: n.seat, title: str(n.title), pay: intOr(n.pay, 0) ?? 0 } : null,
-        staff,
-      },
+      places,
       labour: parseGroup(o.labour),
       odd: parseGroup(o.odd),
       member: o.member === true,

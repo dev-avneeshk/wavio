@@ -13,7 +13,8 @@ import { Builder, C, T } from "../land/geo";
 import { jungleObstacles, walkClamp } from "../land/jungle";
 import { townCenter } from "../land/layout";
 import { decodeLook, lookForPlot, type Look } from "./look";
-import { AMBULANCE, HOSPITAL, KIOSK, groundY, homeOf, obstaclesOf, type Home, type Obstacle } from "./nav";
+import { AMBULANCE, HOSPITAL, KIOSK, WORK_KINDS, groundY, homeOf, obstaclesOf, workFrame, type Home, type Obstacle, type WorkKind } from "./nav";
+import { signFrameGeo, signSpot, workSignTex, workplaceGeo } from "./workplaces";
 import { actCode, actOf, buildRig, disposeRig, poseRig, strideOf, type Act, type Anim, type Gait, type Rig } from "./rig";
 import { evalPose, newPose, plansFor, type Plan, type PlanContext, type Pose } from "./timeline";
 
@@ -240,6 +241,7 @@ export class People {
   private kiosk: THREE.Group | null = null; // the Job Market and the hospital
   private kioskSign: THREE.MeshBasicMaterial | null = null;
   private hospitalSign: THREE.MeshBasicMaterial | null = null;
+  private workSigns = new Map<WorkKind, THREE.MeshBasicMaterial>();
 
   private town = 0;
   private persons = new Map<number, Person>();
@@ -1108,6 +1110,32 @@ export class People {
     hg.position.set(ox + HOSPITAL.x, 0, oz + HOSPITAL.z);
     root.add(hg);
 
+    // The civic quarter: police, fire, tech park, bank, school and film studio.
+    for (const kind of WORK_KINDS) {
+      const f = workFrame(kind, this.town);
+      const wg = new THREE.Group();
+      const body = new THREE.Mesh(workplaceGeo(kind), this.mat);
+      body.castShadow = !this.o.lowPower;
+      body.receiveShadow = true;
+      wg.add(body);
+      wg.add(new THREE.Mesh(signFrameGeo(kind), this.mat));
+      let mat = this.workSigns.get(kind);
+      if (!mat) {
+        mat = new THREE.MeshBasicMaterial({ map: workSignTex(kind, this.o.font) });
+        this.workSigns.set(kind, mat);
+      }
+      const s = signSpot(kind);
+      for (const side of s.roof ? [1, -1] : [1]) {
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(s.width, s.height), mat);
+        sign.position.set(s.x, s.y, s.z + side * 0.045);
+        if (side < 0) sign.rotation.y = Math.PI;
+        wg.add(sign);
+      }
+      wg.position.set(f.x, 0, f.z);
+      wg.rotation.y = f.a;
+      root.add(wg);
+    }
+
     this.group.add(root);
     this.kiosk = root;
   }
@@ -1129,6 +1157,15 @@ export class People {
     this.kioskSign?.dispose();
     this.hospitalSign?.map?.dispose();
     this.hospitalSign?.dispose();
+    for (const m of this.workSigns.values()) {
+      m.map?.dispose();
+      m.dispose();
+    }
+    if (this.kiosk)
+      this.kiosk.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.geometry.dispose();
+      });
     this.mat.dispose();
     this.farMat.dispose();
     this.group.removeFromParent();

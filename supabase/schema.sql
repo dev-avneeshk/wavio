@@ -332,22 +332,18 @@ create table if not exists public.characters (
 
 create index if not exists characters_town_next_idx on public.characters (town, next_at);
 
--- Jobs (section 13): which kind of job (null: none yet), the hospital seat (1 is the best one),
--- when they were hired, and up to when their pay has been added to their wallet.
+-- Jobs (section 13): which kind of job (null: none yet), the seat at a workplace with seats (1 is
+-- the best one), when they were hired, and up to when their pay has been added to their wallet.
 alter table public.characters add column if not exists job_kind text;
 alter table public.characters add column if not exists job_seat smallint;
 alter table public.characters add column if not exists hired_at timestamptz;
 alter table public.characters add column if not exists paid_at timestamptz;
-do $$
-begin
-  if not exists (select 1 from pg_constraint where conname = 'characters_job_kind_ok') then
-    alter table public.characters add constraint characters_job_kind_ok
-      check (job_kind is null or job_kind in ('hospital', 'labour', 'odd'));
-  end if;
-end;
-$$;
--- One person per hospital seat, however many people apply at the same moment.
-create unique index if not exists characters_hospital_seat_idx on public.characters (job_seat) where job_kind = 'hospital';
+alter table public.characters drop constraint if exists characters_job_kind_ok;
+alter table public.characters add constraint characters_job_kind_ok
+  check (job_kind is null or job_kind in ('hospital', 'police', 'engineer', 'fire', 'school', 'bank', 'film', 'labour', 'odd'));
+-- One person per seat at each workplace, however many people apply at the same moment.
+create unique index if not exists characters_job_seat_idx on public.characters (job_kind, job_seat) where job_seat is not null;
+drop index if exists public.characters_hospital_seat_idx;
 
 alter table public.characters enable row level security;
 revoke all on table public.characters from anon, authenticated;
@@ -1340,23 +1336,36 @@ grant execute on function public.my_story(bigint) to authenticated;
 grant execute on function public.char_act(text, integer) to authenticated;
 grant execute on function public.town_events(integer) to anon, authenticated;
 
--- 13. The Job Market. First come, first served. The hospital has a fixed number of seats (one row
---     each in job_titles, seat 1 the best paid); the next person to apply gets the best free one.
---     Building sites (labour) and odd jobs round town always need people; you get one of their
---     titles at random. Pay is coins a day, paid into the wallet as it's earned (char_pay).
---     To open more hospital jobs, add rows to job_titles.
+-- 13. The Job Market. First come, first served. The workplaces (job_places(): the hospital, the
+--     police station, the tech park, the fire station, the school, the bank and the film studio)
+--     have a fixed number of seats each (one row each in job_titles, seat 1 the best paid); the
+--     next person to apply gets the best free one. Building sites (labour) and odd jobs round town
+--     always need people; you get one of their titles at random. Pay is coins a day, paid into the
+--     wallet as it's earned (char_pay). To open more jobs somewhere, add rows to job_titles.
 create table if not exists public.job_titles (
   kind text not null,
   n smallint not null,
   title text not null,
   pay integer not null,
   primary key (kind, n),
-  constraint job_titles_kind_ok check (kind in ('hospital', 'labour', 'odd')),
   constraint job_titles_pay_ok check (pay > 0)
 );
+alter table public.job_titles drop constraint if exists job_titles_kind_ok;
+alter table public.job_titles add constraint job_titles_kind_ok
+  check (kind in ('hospital', 'police', 'engineer', 'fire', 'school', 'bank', 'film', 'labour', 'odd'));
 
 alter table public.job_titles enable row level security;
 revoke all on table public.job_titles from anon, authenticated;
+
+-- The workplaces with seats, in the order the Job Market lists them.
+create or replace function public.job_places()
+returns text[]
+language sql
+immutable
+set search_path = ''
+as $$
+  select array['hospital', 'police', 'engineer', 'fire', 'school', 'bank', 'film'];
+$$;
 
 insert into public.job_titles (kind, n, title, pay) values
   ('hospital', 1, 'Hospital Director (Self-Appointed)', 300),
@@ -1435,9 +1444,80 @@ insert into public.job_titles (kind, n, title, pay) values
   ('odd', 12, 'Fake Tour Guide', 52)
 on conflict (kind, n) do update set title = excluded.title, pay = excluded.pay;
 
--- The market, for anyone: the hospital's free seats and its staff, how many work on the building
--- sites and at odd jobs, what each pays, and your own job if you're signed in.
--- hospital.staff: [seat, title, pay, plot, username] in seat order.
+-- The other workplaces: 30 seats each, seat 1 paying `top` coins a day down to `low` for seat 30.
+insert into public.job_titles (kind, n, title, pay)
+select p.kind, t.n, t.title, round(p.top - (p.top - p.low) * (t.n - 1) / 29.0)::int
+from (values
+  ('police', 280, 110, array[
+    'Police Commissioner (Promoted Himself)', 'Chief Inspector of Samosa Theft', 'Head of Very Loud Sirens',
+    'Detective Who Solves Nothing', 'Sergeant of Lost TV Remotes', 'Undercover Uncle', 'Chief of Traffic Dancing',
+    'Lie Detector (Uses Eyebrows)', 'Moustache Inspector', 'Head of Dramatic Slow Walks', 'Chai Break Supervisor',
+    'Fingerprint Sniffer', 'Donut Evidence Officer', 'Night Patrol Ghost Hunter', 'Speed Breaker Guard',
+    'Thief Chaser (Out of Breath)', 'Officer of Noisy Neighbours', 'Handcuff Juggler', 'Senior Whistle Blower',
+    'Cyber Cop (Can Restart the Wi-Fi)', 'Jail Key Babysitter', 'Head of Wrong Turns', 'Mango Theft Investigator',
+    'Sketch Artist (Draws Stick Men)', 'Officer of Honk Complaints', 'Police Dog''s Assistant',
+    'Constable of Missing Chappals', 'Barricade Mover', 'Trainee Cop (Toy Badge)', 'Station Doorman (Salutes Everyone)'
+  ]),
+  ('engineer', 290, 115, array[
+    'Chief Engineer of Everything (Self-Certified)', 'Rocket Scientist (Paper Rockets)', 'Head of Bridges That Wobble',
+    'AI Engineer (Talks to the Toaster)', 'Senior Wi-Fi Whisperer', 'Robot Babysitter', 'Bug Hunter (Real Bugs Too)',
+    'Chief Jugaad Officer', 'Bridge Engineer (Lego Certified)', 'Professor of Have You Tried Restarting It',
+    'Drone Pilot (Mostly Crashes)', 'Circuit Board Chef', 'Spaghetti Code Untangler', 'Head of Spare Screws',
+    'Satellite Dish Turner', 'Lift Button Tester', 'Solar Panel Polisher', 'Duct Tape Engineer (Fixes Everything)',
+    'Calculator Tamer', 'Cable Untangling Specialist', 'Server Room Fan Operator', '3D Printer Whisperer',
+    'Robot Arm Wrestler', 'Bridge Shaker (Safety Test)', 'Battery Charger in Chief', 'Copy-Paste Engineer',
+    'Screw Counter', 'Blueprint Folder', 'Intern Who Holds the Ladder', 'Junior Engineer of Coffee'
+  ]),
+  ('fire', 260, 105, array[
+    'Fire Chief (Biggest Helmet)', 'Captain of the Longest Ladder', 'Head of Dramatic Rescues', 'Pole Slider in Chief',
+    'Hose Wrangler', 'Cat-Out-of-Tree Specialist', 'Smoke Detector Tester', 'Fire Truck Siren DJ',
+    'Dalmatian''s Best Friend', 'Water Balloon Commander', 'Bucket Chain Captain', 'Burnt Toast Investigator',
+    'Sprinkler Dancer', 'Fire Drill Screamer', 'Chief Extinguisher Polisher', 'Hero Pose Specialist', 'Hydrant Finder',
+    'Ladder Holder (Very Steady)', 'Birthday Candle Inspector', 'Chilli Pepper Firefighter', 'Rescue Rope Knotter',
+    'Helmet Shiner', 'Siren Tester (Every Day, 5 AM)', 'Barbecue Watcher', 'Fire Truck Washer',
+    'Firework Supervisor (Diwali Duty)', 'Puddle Maker', 'Hot Chai Safety Officer',
+    'Trainee Firefighter (Scared of Matches)', 'Fire Station Pet Feeder'
+  ]),
+  ('school', 240, 100, array[
+    'Principal (Owns the Bell)', 'Head of Surprise Tests', 'Maths Wizard (Divides by Zero)', 'Professor of Excuses',
+    'Homework-Eating Dog Investigator', 'Chief Chalk Thrower', 'PT Teacher Who Only Whistles',
+    'Science Teacher (Explodes Things)', 'History Teacher (Was There)', 'Geography Teacher (Always Lost)',
+    'Head of Detention', 'Spelling Bee Keeper', 'Music Teacher (Knows One Song)', 'Art Teacher (Everything Is Abstract)',
+    'Lunchbox Inspector', 'Attendance Shouter', 'Blackboard Duster', 'Library Shush Officer', 'Report Card Signer',
+    'Paper Plane Coach', 'Recess Referee', 'Dance Teacher (Annual Day Only)', 'Computer Teacher (Plays Solitaire)',
+    'Tiffin Taster', 'Lost and Found Keeper', 'Moral Science Storyteller', 'Last Bench Monitor', 'Bell Ringer',
+    'Substitute Teacher (Nobody Listens)', 'Class Monitor (Grown-Up Edition)'
+  ]),
+  ('bank', 270, 110, array[
+    'Bank Manager (Never Smiles)', 'Chief Money Counter (Licks Thumb)', 'Vault Guard (Forgot the Code)',
+    'Head of Lunch Breaks', 'Stamp Slammer', 'Royal Coin Polisher', 'Loan Refuser', 'ATM Whisperer',
+    'Head of Window Closed', 'Passbook Printer', 'Interest Calculator (Mental Maths)', 'Gold Biscuit Guard',
+    'Cheque Bounce Referee', 'Piggy Bank Inspector', 'Head of Come Tomorrow', 'Queue Token Dispenser',
+    'Signature Doesn''t Match Officer', 'Fake Note Detective', 'Locker Key Keeper', 'Pen-on-a-Chain Guard',
+    'Rubber Band Supplier', 'Server Is Down Announcer', 'Coin Stacker', 'Money Plant Waterer',
+    'Calculator Button Presser', 'No Change Available Clerk', 'Form Filler for Grandparents',
+    'Bank Peon (Knows Everything)', 'Junior Cashier (Counts Twice)', 'Security Uncle (Sleeps on the Stool)'
+  ]),
+  ('film', 340, 90, array[
+    'Superstar (Only Does Slow Motion)', 'Director (Yells Cut a Lot)', 'Villain With a Cool Laugh',
+    'Stunt Double (Falls for a Living)', 'Hero''s Hair Stylist', 'Choreographer (Every Song Has a Train)',
+    'Dialogue Writer (Rhymes Everything)', 'Slow-Motion Wind Machine Operator', 'Item Song Backup Dancer',
+    'Comedy Uncle', 'Crying Scene Specialist', 'Fake Rain Maker', 'Background Villain Number Seven',
+    'Explosion Operator', 'Hero''s Mother (Says Beta a Lot)', 'Spot Boy (Brings Chai)', 'Clapperboard Clapper',
+    'Sound Guy (Hears Everything)', 'Moustache Makeup Artist', 'Blooper Collector', 'Fake Blood Mixer',
+    'Horse Rider (No Horse)', 'Paparazzi Stand-In', 'Green Screen Painter', 'Extra Who Waves at the Camera',
+    'Popcorn Tester', 'Poster Gluer', 'Crowd Shouter', 'Junior Artist (Tree Number 2)',
+    'Studio Watchman (Wants to Act)'
+  ])
+) as p(kind, top, low, titles)
+cross join lateral unnest(p.titles) with ordinality as t(title, n)
+on conflict (kind, n) do update set title = excluded.title, pay = excluded.pay;
+
+-- The market, for anyone: every workplace's free seats and its staff, how many work on the
+-- building sites and at odd jobs, what each pays, and your own job if you're signed in.
+-- places: [{kind, total, open, next, top, staff}] in job_places() order; staff: [seat, title, pay,
+-- plot, username] in seat order; top: seat 1. hospital: the hospital's entry again (older pages
+-- read only that).
 create or replace function public.job_market()
 returns json
 language sql
@@ -1446,28 +1526,38 @@ security definer
 set search_path = ''
 as $$
   with seats as (
-    select t.n, t.title, t.pay, c.plot, w.instagram_username as username
+    select t.kind, t.n, t.title, t.pay, c.plot, w.instagram_username as username
     from public.job_titles t
-    left join public.characters c on c.job_kind = 'hospital' and c.job_seat = t.n
+    left join public.characters c on c.job_kind = t.kind and c.job_seat = t.n
     left join public.waitlist w on w.plot = c.plot
-    where t.kind = 'hospital'
+    where t.kind = any (public.job_places())
+  ),
+  places as (
+    select k.kind, k.ord, json_build_object(
+      'kind', k.kind,
+      'total', (select count(*)::int from seats s where s.kind = k.kind),
+      'open', (select count(*)::int from seats s where s.kind = k.kind and s.plot is null),
+      'next', (
+        select json_build_object('seat', s.n, 'title', s.title, 'pay', s.pay)
+        from seats s where s.kind = k.kind and s.plot is null order by s.n limit 1
+      ),
+      'top', (
+        select json_build_object('seat', s.n, 'title', s.title, 'pay', s.pay)
+        from seats s where s.kind = k.kind order by s.n limit 1
+      ),
+      'staff', coalesce((
+        select json_agg(json_build_array(s.n, s.title, s.pay, s.plot, s.username) order by s.n)
+        from seats s where s.kind = k.kind and s.plot is not null
+      ), '[]'::json)
+    ) as j
+    from unnest(public.job_places()) with ordinality as k(kind, ord)
   ),
   me as (
     select c.* from public.characters c where c.plot = public.my_plot()
   )
   select json_build_object(
-    'hospital', json_build_object(
-      'total', (select count(*)::int from seats),
-      'open', (select count(*)::int from seats s where s.plot is null),
-      'next', (
-        select json_build_object('seat', s.n, 'title', s.title, 'pay', s.pay)
-        from seats s where s.plot is null order by s.n limit 1
-      ),
-      'staff', coalesce((
-        select json_agg(json_build_array(s.n, s.title, s.pay, s.plot, s.username) order by s.n)
-        from seats s where s.plot is not null
-      ), '[]'::json)
-    ),
+    'places', (select json_agg(p.j order by p.ord) from places p),
+    'hospital', (select p.j from places p where p.kind = 'hospital'),
     'labour', (
       select json_build_object(
         'workers', (select count(*)::int from public.characters c where c.job_kind = 'labour'),
@@ -1491,8 +1581,8 @@ as $$
   );
 $$;
 
--- Apply for a job (p_kind: hospital, labour or odd). The hospital gives you its best free seat,
--- or says it's full. Taking a job leaves the one you had (a hospital seat goes back on the market).
+-- Apply for a job (p_kind: one of job_places(), labour or odd). A workplace gives you its best free
+-- seat, or says it's full. Taking a job leaves the one you had (its seat goes back on the market).
 -- Pay for the old job is settled first. One change a minute.
 create or replace function public.take_job(p_kind text)
 returns json
@@ -1509,7 +1599,7 @@ begin
   if me is null then
     raise exception 'join the waitlist first' using hint = 'game_not_on_list';
   end if;
-  if p_kind is null or p_kind not in ('hospital', 'labour', 'odd') then
+  if p_kind is null or not (p_kind = any (public.job_places()) or p_kind in ('labour', 'odd')) then
     raise exception 'no such job' using hint = 'job_bad_kind';
   end if;
   -- One hire at a time, everywhere: first come, first served.
@@ -1524,14 +1614,14 @@ begin
   if c.hired_at > now() - interval '1 minute' then
     raise exception 'too soon' using hint = 'job_wait';
   end if;
-  if p_kind = 'hospital' then
+  if p_kind = any (public.job_places()) then
     select * into s from public.job_titles t
-    where t.kind = 'hospital'
-      and not exists (select 1 from public.characters x where x.job_kind = 'hospital' and x.job_seat = t.n)
+    where t.kind = p_kind
+      and not exists (select 1 from public.characters x where x.job_kind = p_kind and x.job_seat = t.n)
     order by t.n
     limit 1;
     if not found then
-      raise exception 'hospital full' using hint = 'job_full';
+      raise exception 'no seats left' using hint = 'job_full';
     end if;
   else
     select * into s from public.job_titles t where t.kind = p_kind order by random() limit 1;
@@ -1541,7 +1631,7 @@ begin
   end if;
   perform public.char_pay(me);
   update public.characters x set
-    job = s.title, job_kind = s.kind, job_seat = case when s.kind = 'hospital' then s.n end,
+    job = s.title, job_kind = s.kind, job_seat = case when s.kind = any (public.job_places()) then s.n end,
     income = s.pay, hired_at = now(), paid_at = now()
   where x.plot = me
   returning * into c;
@@ -1549,7 +1639,7 @@ begin
 end;
 $$;
 
--- Leave your job: pay up to now, and a hospital seat goes back on the market.
+-- Leave your job: pay up to now, and your seat goes back on the market.
 create or replace function public.quit_job()
 returns json
 language plpgsql

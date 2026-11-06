@@ -304,3 +304,51 @@ export function CupIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+export function BadgeIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M12 3.5 19 6v5.5c0 4.2-3 7.4-7 9-4-1.6-7-4.8-7-9V6l7-2.5z" />
+      <path d="m12 8.2 1.2 2.4 2.6.4-1.9 1.8.5 2.6-2.4-1.3-2.4 1.3.5-2.6-1.9-1.8 2.6-.4z" />
+    </svg>
+  );
+}
+export function GearIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6" />
+      <circle cx="12" cy="12" r="6.3" />
+    </svg>
+  );
+}
+export function FlameIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M12 20.5c-3.6 0-6-2.4-6-5.7 0-3.6 3-5.4 3.6-9.3 2.1 1.3 3.2 3.2 3.1 5.4 1-.5 1.7-1.5 1.9-2.8 1.9 1.6 3.4 4 3.4 6.7 0 3.3-2.4 5.7-6 5.7z" />
+      <path d="M12 20.5c-1.4 0-2.4-1-2.4-2.4 0-1.6 1.4-2.3 1.7-3.9 1.6 1 3.1 2.3 3.1 3.9 0 1.4-1 2.4-2.4 2.4z" />
+    </svg>
+  );
+}
+export function CapIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="m2.5 9.5 9.5-4.5 9.5 4.5-9.5 4.5z" />
+      <path d="M6.5 11.5v4c1.4 1.5 3.3 2.3 5.5 2.3s4.1-.8 5.5-2.3v-4M21.5 9.5v5" />
+    </svg>
+  );
+}
+export function BankIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <path d="M3.5 9 12 4l8.5 5zM5 20h14M3.5 20.5h17M6.5 11.5v6M10 11.5v6M14 11.5v6M17.5 11.5v6" />
+    </svg>
+  );
+}
+export function ClapperIcon({ className }: { className?: string }) {
+  return (
+    <svg {...stroke} className={className}>
+      <rect x="3.5" y="10" width="17" height="10" rx="1.5" />
+      <path d="m3.6 9.6 15.6-4.3-.9-2.9L2.7 6.7zM7.6 5.6l2.9 2.3M12.4 4.3l2.9 2.3" />
+    </svg>
+  );
+}

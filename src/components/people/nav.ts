@@ -12,6 +12,7 @@ import {
   TOWN_RINGS,
   Y0,
   hashStr,
+  isCivic,
   isPark,
   isPlaza,
   lotForPlot,
@@ -293,6 +294,138 @@ export const oddJobSpot = (town: number, seed: number): { p: Pt; ry: number } =>
   return { p: { x: ox - 4.5 + (seed % 10), z: oz + 11.4 + ((seed >>> 4) % 2) * 1.4 }, ry: 0 };
 };
 
+// ---------- the civic quarter: six more workplaces (town coordinates, plaza at 0,0) ----------
+
+// Two workplaces to each civic block (layout.ts CIVIC), one in each half, door towards the plaza's
+// side of the block. Everything about a workplace is in its own frame: x across, +z out of the
+// front door towards the street; its front wall is at z = WORK_FRONT and its building is hx by hz
+// (centred at z = WORK_FRONT - hz) and h tall. props: the things in its yard that people bump into
+// (cars, a fire engine, a slide...). spots: where people stand on shift, across the front.
+export type WorkKind = "police" | "fire" | "engineer" | "bank" | "school" | "film";
+export const WORK_KINDS: readonly WorkKind[] = ["police", "fire", "engineer", "bank", "school", "film"];
+export type Prop = { x: number; z: number; hx: number; hz: number; h: number };
+type WorkSpec = { i: number; j: number; side: -1 | 1; hx: number; hz: number; h: number; props: Prop[]; spots: number[] };
+export const WORK_FRONT = 1;
+const HALF_BLOCK = BX / 4;
+const SPOTS = [-4.4, -2.9, -1.4, 1.4, 2.9, 4.4];
+const SPOT_Z = [WORK_FRONT + 2.6, WORK_FRONT + 3.8];
+
+export const WORK: Record<WorkKind, WorkSpec> = {
+  police: {
+    i: -2,
+    j: -2,
+    side: -1,
+    hx: 7.5,
+    hz: 5.5,
+    h: 6.2,
+    props: [
+      { x: -9.6, z: 8.2, hx: 0.95, hz: 2.1, h: 1.7 },
+      { x: 9.6, z: 8.2, hx: 0.95, hz: 2.1, h: 1.7 },
+    ],
+    spots: SPOTS,
+  },
+  fire: {
+    i: -2,
+    j: -2,
+    side: 1,
+    hx: 8.5,
+    hz: 6,
+    h: 6.8,
+    props: [
+      { x: -4.3, z: 6.1, hx: 1.3, hz: 3.4, h: 3.0 },
+      { x: 9.6, z: 9.6, hx: 0.3, hz: 0.3, h: 0.9 },
+    ],
+    spots: [-1.2, 0.4, 2.0, 3.6, 5.2, 6.6],
+  },
+  engineer: {
+    i: 2,
+    j: -2,
+    side: -1,
+    hx: 7,
+    hz: 6,
+    h: 11.6,
+    props: [
+      { x: -9.4, z: 9.0, hx: 1.7, hz: 0.6, h: 3.8 },
+      { x: 9.4, z: 9.0, hx: 0.9, hz: 0.7, h: 3.3 },
+    ],
+    spots: SPOTS,
+  },
+  bank: {
+    i: 2,
+    j: -2,
+    side: 1,
+    hx: 7.5,
+    hz: 5.5,
+    h: 6.6,
+    props: [
+      { x: -9.6, z: 8.4, hx: 1.05, hz: 2.3, h: 2.2 },
+      { x: 9.8, z: 6.0, hx: 0.8, hz: 0.7, h: 2.4 },
+    ],
+    spots: SPOTS,
+  },
+  school: {
+    i: 2,
+    j: 1,
+    side: -1,
+    hx: 9,
+    hz: 5,
+    h: 6.4,
+    props: [
+      { x: -9.6, z: 10.4, hx: 0.75, hz: 2.4, h: 2.6 },
+      { x: 9.2, z: 10.8, hx: 1.9, hz: 0.8, h: 2.5 },
+      { x: -7.0, z: 4.6, hx: 0.25, hz: 0.25, h: 8.5 },
+    ],
+    spots: SPOTS,
+  },
+  film: {
+    i: 2,
+    j: 1,
+    side: 1,
+    hx: 9.5,
+    hz: 7,
+    h: 6.6,
+    props: [
+      { x: -9.8, z: 9.2, hx: 1.4, hz: 0.5, h: 3.4 },
+      { x: 7.0, z: 7.6, hx: 0.6, hz: 0.6, h: 2.0 },
+      { x: 10.4, z: 11.2, hx: 0.55, hz: 0.55, h: 3.8 },
+    ],
+    spots: SPOTS,
+  },
+};
+
+// A workplace's frame in the world: its origin, which way its front faces, and frame -> world.
+export const workFrame = (kind: WorkKind, town: number) => {
+  const w = WORK[kind];
+  const [ox, oz] = townCenter(town);
+  const x = ox + w.i * PX + w.side * HALF_BLOCK;
+  const z = oz + w.j * PZ;
+  const a = w.j < 0 ? 0 : Math.PI;
+  const at = (lx: number, lz: number): Pt => {
+    const [rx, rz] = rot(lx, lz, a);
+    return { x: x + rx, z: z + rz };
+  };
+  return { x, z, a, at };
+};
+
+// The buildings (world boxes, top = roof sign) of a town's workplaces.
+export const workBuildings = (town: number) =>
+  WORK_KINDS.map((kind) => {
+    const w = WORK[kind];
+    const c = workFrame(kind, town).at(0, WORK_FRONT - w.hz);
+    return { kind, x: c.x, z: c.z, hx: w.hx, hz: w.hz, top: 0.6 + w.h + 2.4 };
+  });
+
+// On shift at a workplace: a spot across its front, the way to face (out to the street, more or
+// less) and the way in from the pavement in front of the block.
+export const workShift = (kind: WorkKind, town: number, seed: number): { p: Pt; ry: number; path: Pt[] } => {
+  const w = WORK[kind];
+  const f = workFrame(kind, town);
+  const k = seed % (w.spots.length * 2);
+  const lx = w.spots[k % w.spots.length];
+  const p = f.at(lx, SPOT_Z[k < w.spots.length ? 0 : 1]);
+  return { p, ry: f.a + (((seed >>> 3) % 3) - 1) * 0.5, path: [f.at(lx, SIDE.z), p] };
+};
+
 // Labour: the building site next door (the house one along, in the same town).
 export const siteFor = (plot: number, seed: number) => {
   const local = (plot - 1) % 1000;
@@ -314,7 +447,7 @@ const parksOf = (town: number) => {
   v = [];
   for (let i = -R; i <= R; i++)
     for (let j = -R; j <= R; j++) {
-      if (isPlaza(i, j) || !isPark(i, j)) continue;
+      if (isPlaza(i, j) || !isPark(i, j) || isCivic(i, j)) continue;
       const cx = ox + i * PX;
       const cz = oz + j * PZ;
       v.push({
@@ -384,6 +517,14 @@ export const obstaclesOf = (town: number): Obstacle[] => {
   ];
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) v.push({ x: ox + sx * 23, z: oz + sz * 13.5, hx: 4.1, hz: 4.1 });
   for (const pk of parksOf(town)) v.push({ x: ox + pk.i * PX, z: oz + pk.j * PZ, hx: 7.2, hz: 4.6 });
+  for (const b of workBuildings(town)) v.push({ x: b.x, z: b.z, hx: b.hx + 0.2, hz: b.hz + 0.2 });
+  for (const kind of WORK_KINDS) {
+    const f = workFrame(kind, town);
+    for (const p of WORK[kind].props) {
+      const c = f.at(p.x, p.z);
+      v.push({ x: c.x, z: c.z, hx: p.hx + 0.15, hz: p.hz + 0.15 });
+    }
+  }
   obstacleCache.set(town, v);
   return v;
 };
@@ -397,6 +538,7 @@ export const tallThings = (town: number) => {
     { x: ox + HOSPITAL.x, z: oz + HOSPITAL.z, hx: HOSPITAL.hx + 0.25, hz: HOSPITAL.hz + 0.25, top: 0.6 + HOSPITAL.h + 1.6 },
     { x: ox - 14.8, z: oz + 12.5, hx: 3.0, hz: 3.0, top: 36 },
     { x: ox + 14.8, z: oz - 12.5, hx: 2.6, hz: 2.6, top: 30 },
+    ...workBuildings(town).map((b) => ({ x: b.x, z: b.z, hx: b.hx + 0.25, hz: b.hz + 0.25, top: b.top })),
   ];
 };
 

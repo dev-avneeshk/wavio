@@ -130,6 +130,14 @@ for (let r = 1; r <= TOWN_RINGS; r++) blockOrder.push(...ringBlocks(r));
 const extraParks = new Set(blockOrder.slice(BLOCKS_PER_TOWN).map(([i, j]) => `${i},${j}`));
 
 export const isPark = (i: number, j: number) => isGridPark(i, j) || extraParks.has(`${i},${j}`);
+// Three of ring 2's four parks are the civic quarter instead: two workplaces on each block
+// (people/nav.ts WORK). They're still parks as far as the plots go, so no house moves.
+export const CIVIC: readonly [number, number][] = [
+  [-2, -2],
+  [2, -2],
+  [2, 1],
+];
+export const isCivic = (i: number, j: number) => CIVIC.some(([a, b]) => a === i && b === j);
 
 export type Row = "S" | "N";
 export type Lot = {

@@ -17,11 +17,17 @@ export type GameEvent = {
   live: boolean; // done by a player in the game
 };
 
-// The kinds of job at the Job Market (supabase/schema.sql, section 13).
-export type JobKind = "hospital" | "labour" | "odd";
+// The kinds of job at the Job Market (supabase/schema.sql, section 13). The workplaces have a fixed
+// number of seats each (first come, first served); building sites and odd jobs always hire.
+export const PLACES = ["hospital", "police", "engineer", "fire", "school", "bank", "film"] as const;
+export type PlaceKind = (typeof PLACES)[number];
+export type JobKind = PlaceKind | "labour" | "odd";
+export const JOB_KINDS: readonly JobKind[] = [...PLACES, "labour", "odd"];
+export const isJobKind = (v: unknown): v is JobKind => typeof v === "string" && (JOB_KINDS as readonly string[]).includes(v);
+export const isPlace = (k: JobKind | null | undefined): k is PlaceKind => !!k && (PLACES as readonly string[]).includes(k);
 
 // Your own person (wallet and health are only sent to you). job: the job's title; seat: your seat
-// at the hospital (1 is the best).
+// at a workplace (1 is the best).
 export type MyChar = {
   plot: number;
   look: number;
@@ -60,6 +66,7 @@ type GameState = {
   story: StoryItem[]; // newest first
   storyOpen: boolean;
   jobsOpen: boolean; // the Job Market panel
+  jobsFocus: JobKind | null; // opened by tapping a workplace: show that one first
   toasts: Toast[];
   busy: boolean; // a fight or theft is being decided
 };
@@ -73,6 +80,7 @@ const initial: GameState = {
   story: [],
   storyOpen: false,
   jobsOpen: false,
+  jobsFocus: null,
   toasts: [],
   busy: false,
 };
@@ -135,6 +143,12 @@ const fmt = (n: number) => n.toLocaleString("en");
 export const TASKS: Record<string, { past: string; now: string; going?: string }> = {
   jobqueue: { past: "Hung about at the Job Market.", now: "At the Job Market", going: "Off to the Job Market" },
   work_hospital: { past: "Did a shift at the hospital.", now: "On shift at the hospital", going: "Off to the hospital" },
+  work_police: { past: "Did a shift at the Police Station.", now: "On duty at the Police Station", going: "Off to the Police Station" },
+  work_engineer: { past: "Engineered things at the Tech Park.", now: "Engineering at the Tech Park", going: "Off to the Tech Park" },
+  work_fire: { past: "Did a shift at the Fire Station.", now: "On call at the Fire Station", going: "Off to the Fire Station" },
+  work_school: { past: "Taught a class at the City School.", now: "Teaching at the City School", going: "Off to school" },
+  work_bank: { past: "Counted money at the City Bank.", now: "Counting money at the bank", going: "Off to the bank" },
+  work_film: { past: "Shot a scene at Lazy Films Studio.", now: "Shooting a film at the studio", going: "Off to the film studio" },
   work_labour: { past: "Did a shift on a building site.", now: "Working on a building site", going: "Off to work" },
   work_odd: { past: "Did odd jobs round the plaza.", now: "Doing odd jobs", going: "Off to work" },
   sweep: { past: "Swept the front garden.", now: "Sweeping the garden" },
@@ -148,17 +162,83 @@ export const TASKS: Record<string, { past: string; now: string; going?: string }
 
 export const jobText = (job: string | null) => job ?? "Waiting for a job";
 
-// Where each kind of job is.
-export const JOB_PLACE: Record<JobKind, string> = {
-  hospital: "City Hospital",
-  labour: "Building sites",
-  odd: "Odd jobs",
+// Each kind of job in words: where it is, what you'd be, and the buttons to apply.
+export const JOB_INFO: Record<JobKind, { place: string; where: string; role: string; apply: string; switchTo: string; blurb: string }> = {
+  hospital: {
+    place: "City Hospital",
+    where: "at the City Hospital",
+    role: "Doctor",
+    apply: "Become a doctor",
+    switchTo: "Switch to the hospital",
+    blurb: "The craziest jobs in medicine, from Professor of Hiccups to Emergency Room DJ.",
+  },
+  police: {
+    place: "Police Station",
+    where: "at the Police Station",
+    role: "Police officer",
+    apply: "Join the police",
+    switchTo: "Switch to the police",
+    blurb: "Chief Inspector of Samosa Theft, Moustache Inspector, Handcuff Juggler and more.",
+  },
+  engineer: {
+    place: "Tech Park",
+    where: "at the Tech Park",
+    role: "Engineer",
+    apply: "Become an engineer",
+    switchTo: "Switch to engineering",
+    blurb: "Rocket Scientist (Paper Rockets), Chief Jugaad Officer, Robot Babysitter and more.",
+  },
+  fire: {
+    place: "Fire Station",
+    where: "at the Fire Station",
+    role: "Firefighter",
+    apply: "Become a firefighter",
+    switchTo: "Switch to the fire station",
+    blurb: "Pole Slider in Chief, Cat-Out-of-Tree Specialist, Fire Truck Siren DJ and more.",
+  },
+  school: {
+    place: "City School",
+    where: "at the City School",
+    role: "Teacher",
+    apply: "Become a teacher",
+    switchTo: "Switch to teaching",
+    blurb: "Head of Surprise Tests, Chief Chalk Thrower, PT Teacher Who Only Whistles and more.",
+  },
+  bank: {
+    place: "City Bank",
+    where: "at the City Bank",
+    role: "Banker",
+    apply: "Work at the bank",
+    switchTo: "Switch to the bank",
+    blurb: "Loan Refuser, Head of Come Tomorrow, Vault Guard (Forgot the Code) and more.",
+  },
+  film: {
+    place: "Lazy Films Studio",
+    where: "at Lazy Films Studio",
+    role: "Film star or crew",
+    apply: "Get into films",
+    switchTo: "Switch to films",
+    blurb: "Superstar, Villain With a Cool Laugh, Stunt Double, Fake Rain Maker and more.",
+  },
+  labour: {
+    place: "Building sites",
+    where: "on the building sites",
+    role: "Labourer",
+    apply: "Work as a labourer",
+    switchTo: "Switch to labour",
+    blurb: "Brick Juggler, Scaffolding Monkey, Cement Mixer Whisperer and more.",
+  },
+  odd: {
+    place: "Odd jobs",
+    where: "doing odd jobs round town",
+    role: "Odd jobs round town",
+    apply: "Do odd jobs",
+    switchTo: "Switch to odd jobs",
+    blurb: "Chai Wallah, Mango Seller, Walker of Seven Dogs and more.",
+  },
 };
-export const JOB_WHERE: Record<JobKind, string> = {
-  hospital: "at the City Hospital",
-  labour: "on the building sites",
-  odd: "doing odd jobs round town",
-};
+export const JOB_PLACE = Object.fromEntries(JOB_KINDS.map((k) => [k, JOB_INFO[k].place])) as Record<JobKind, string>;
+export const JOB_WHERE = Object.fromEntries(JOB_KINDS.map((k) => [k, JOB_INFO[k].where])) as Record<JobKind, string>;
 export const incomeText = (income: number) => `${fmt(Math.max(0, income))} coins/day`;
 
 const who = (s: StoryItem) => (s.otherName ? `@${s.otherName}` : "a neighbour");

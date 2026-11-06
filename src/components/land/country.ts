@@ -7,6 +7,7 @@ import { Builder, C, T, roofTpl, type Tpl } from "./geo";
 import { CRANE, LAMP_HEAD } from "./build";
 import { buildCanopy, inJungle } from "./jungle";
 import { houseSpec } from "./spec";
+import { HOSPITAL, WORK, workBuildings, type WorkKind } from "../people/nav";
 import {
   ASPHALT,
   BX,
@@ -24,6 +25,7 @@ import {
   WALK,
   Y0,
   hashStr,
+  isCivic,
   isPark,
   isPlaza,
   lotForPlot,
@@ -37,6 +39,15 @@ const LEAF = ["#5DAE45", "#6CBB4C", "#4F9F3D", "#78C257", "#64B04A"];
 const PINE = ["#3E8E4A", "#2F7D45", "#47975A"];
 const FIELDS = ["#B5DB7E", "#A4D16E", "#E2CF7F", "#D7BE8E", "#C3DF8A", "#9DCB63", "#E8D88F"];
 const MARGIN = 1700; // countryside beyond the outermost towns
+// Wall and roof colours of the workplaces, seen from afar.
+const FAR_WORK: Record<WorkKind, [string, string]> = {
+  police: ["#E9EEF4", "#1E4B9A"],
+  fire: ["#B8432F", "#F2EEE6"],
+  engineer: ["#6E9BB8", "#2B3440"],
+  bank: ["#EFE6D2", "#D8B34A"],
+  school: ["#F3CF79", "#C8443A"],
+  film: ["#4A4E57", "#C9CDD3"],
+};
 
 // A growable list of instances: a transform (scale, turn about y, move) and a colour each.
 export class Inst {
@@ -249,6 +260,8 @@ export const buildFarTowns = (maxTown: number, skip: number, houses: (t: number)
           b.add(roofTpl(0), cx - 14.8, Y0 + 25, cz + 12.5, 5.4, 7, 5.4, 0, C("#D2483A"));
           b.add(T.taper, cx + 14.8, Y0 + 11, cz - 12.5, 2.8, 22, 2.8, 0, C("#E9E3D8"));
           b.add(T.cone, cx + 14.8, Y0 + 23.5, cz - 12.5, 2.2, 3, 2.2, 0, C("#C8402F"));
+        } else if (isCivic(i, j)) {
+          b.add(T.quadY, cx, 0.42, cz, BX - 3.2, 1, BZ - 3.2, 0, lawn);
         } else if (isPark(i, j)) {
           b.add(T.quadY, cx, 0.42, cz, BX - 3.2, 1, BZ - 3.2, 0, C("#8ED061"));
           b.add(T.quadY, cx, 0.44, cz, 13, 1, 8.5, 0, C("#6FC0E6"));
@@ -260,6 +273,14 @@ export const buildFarTowns = (maxTown: number, skip: number, houses: (t: number)
           for (const sx of [-1, 1]) for (const sz of [-1, 1]) lights.push(cx + sx * (BX / 2 - 0.8), 0.3 + LAMP_HEAD, cz + sz * (BZ / 2 - 0.8));
       }
 
+    // The hospital and the civic quarter's workplaces, as plain blocks.
+    bodies.add(ox + HOSPITAL.x, Y0 + 0.2 + HOSPITAL.h / 2, oz + HOSPITAL.z, HOSPITAL.hx * 2, HOSPITAL.h, HOSPITAL.hz * 2, 0, C("#F4F1EA"));
+    for (const w of workBuildings(t)) {
+      const [wall, roof] = FAR_WORK[w.kind];
+      const h = WORK[w.kind].h;
+      bodies.add(w.x, Y0 + 0.2 + h / 2, w.z, w.hx * 2, h, w.hz * 2, 0, C(wall));
+      bodies.add(w.x, Y0 + 0.2 + h + 0.2, w.z, w.hx * 2 + 0.3, 0.4, w.hz * 2 + 0.3, 0, C(roof));
+    }
     const n = Math.min(TOWN_SIZE, houses(t));
     const first = firstPlotOf(t);
     for (let q = 0; q < n; q++) {

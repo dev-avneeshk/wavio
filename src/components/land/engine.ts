@@ -28,10 +28,10 @@ import {
   type OwnBuild,
   type TownBuild,
 } from "./build";
-import type { GameEvent } from "@/lib/game";
+import type { GameEvent, JobKind } from "@/lib/game";
 import type { TownFeed } from "@/lib/game-api";
 import type { LiveLink } from "@/lib/game-live";
-import { HOSPITAL, KIOSK, homeOf, tallThings } from "../people/nav";
+import { HOSPITAL, KIOSK, homeOf, tallThings, workBuildings } from "../people/nav";
 import { People, type Near, type PersonInfo } from "../people/people";
 import { Wildlife, type AnimalNote } from "../wild/animals";
 import { JUNGLE, buildJungle, gateSignTex, jungleOf, zoneAt, type JungleBuild, type Zone } from "./jungle";
@@ -230,8 +230,8 @@ export type LandEngineOptions = {
   onAnimal?: (note: AnimalNote) => void;
   // Play mode started or ended (also when it can't start yet).
   onPlay?: (on: boolean) => void;
-  // The Job Market booth or the hospital was tapped.
-  onJobs?: () => void;
+  // The Job Market booth (null) or a workplace (its kind) was tapped.
+  onJobs?: (kind: JobKind | null) => void;
 };
 
 // Keys that walk your person (arrows or WASD), and Shift to run.
@@ -1533,16 +1533,31 @@ export class LandEngine {
 
   private pickDist = Infinity; // how far along the ray the last picked house was
 
-  // The ray (set by the last pick) hits the Job Market booth or the hospital in the town drawn in detail.
-  private pickJobs() {
-    if (!this.active) return false;
+  // What the ray (set by the last pick) hits in the town drawn in detail: the Job Market booth
+  // (null: the market as a whole), the hospital or another workplace; undefined if none of them.
+  private pickJobs(): JobKind | null | undefined {
+    if (!this.active) return undefined;
     const [ox, oz] = townCenter(this.active);
     const box = new THREE.Box3();
-    return [KIOSK, HOSPITAL].some((b) => {
-      box.min.set(ox + b.x - b.hx, 0, oz + b.z - b.hz);
-      box.max.set(ox + b.x + b.hx, 0.6 + b.h + 2.2, oz + b.z + b.hz);
-      return this.ray.ray.intersectsBox(box);
-    });
+    const hits: { kind: JobKind | null; x: number; z: number; hx: number; hz: number; top: number }[] = [
+      { kind: null, x: ox + KIOSK.x, z: oz + KIOSK.z, hx: KIOSK.hx, hz: KIOSK.hz, top: 0.6 + KIOSK.h + 2.2 },
+      { kind: "hospital", x: ox + HOSPITAL.x, z: oz + HOSPITAL.z, hx: HOSPITAL.hx, hz: HOSPITAL.hz, top: 0.6 + HOSPITAL.h + 2.2 },
+      ...workBuildings(this.active),
+    ];
+    let best: JobKind | null | undefined = undefined;
+    let bestD = Infinity;
+    const at = new THREE.Vector3();
+    for (const b of hits) {
+      box.min.set(b.x - b.hx, 0, b.z - b.hz);
+      box.max.set(b.x + b.hx, b.top, b.z + b.hz);
+      if (!this.ray.ray.intersectBox(box, at)) continue;
+      const d = at.distanceToSquared(this.ray.ray.origin);
+      if (d < bestD) {
+        bestD = d;
+        best = b.kind;
+      }
+    }
+    return best;
   }
 
   // The town under a screen point (0 if none).
@@ -1603,10 +1618,13 @@ export class LandEngine {
       if (t) void this.flyToTown(t);
       return;
     }
-    // A tap on the Job Market booth or the hospital opens the Job Market.
-    if (this.opts.onJobs && this.zone === "town" && this.pickJobs()) {
-      this.opts.onJobs();
-      return;
+    // A tap on the Job Market booth or a workplace opens the Job Market (at that workplace).
+    if (this.opts.onJobs && this.zone === "town") {
+      const kind = this.pickJobs();
+      if (kind !== undefined) {
+        this.opts.onJobs(kind);
+        return;
+      }
     }
     // A tap on an empty plot picks it.
     const lot = this.freeLotAt(e.clientX, e.clientY);
